@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: ElimuLink-API
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm run server
+    envVars:
+      - key: ADMIN_PASSCODE_HASH
+        secure: true
+      - key: ADMIN_JWT_SECRET
+        secure: true
+      - key: OPENAI_API_KEY
+        secure: true
+      - key: FIREBASE_ADMIN_SA
+        secure: true
+      - key: VITE_APP_ID
+        value: elimulink-pro-v2
+    autoDeploy: true
+    disk: 1024
+    regions:
+      - oregon

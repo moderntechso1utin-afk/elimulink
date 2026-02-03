@@ -1,0 +1,47 @@
+{
+  "name": "elimulink-api",
+  "version": "1.0.0",
+  "description": "AI-powered student learning assistant with library module",
+  "main": "src/index.jsx",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "server": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase": "^12.8.0",
+    "firebase-admin": "^12.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^0.563.0",
+    "node-fetch": "^3.2.10",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "^5.0.1",
+    "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.14",
+    "postcss": "^8.4.24",
+    "tailwindcss": "^3.3.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

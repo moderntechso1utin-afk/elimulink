@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ElimuLink — Offline</title>
+  <meta name="theme-color" content="#2563eb" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; background:#0f1724; color:#e6eef8; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+    .card{ max-width:640px; width:100%; padding:24px; background:#0b1220; border-radius:12px; box-shadow:0 6px 30px rgba(2,6,23,0.6); }
+    h1{ margin:0 0 8px 0; font-size:20px; color:#60a5fa }
+    p{ margin:0 0 12px 0; color:#94a3b8 }
+    .messages{ margin-top:12px; background:#071226; padding:12px; border-radius:8px; max-height:320px; overflow:auto }
+    .msg{ padding:8px; border-bottom:1px solid rgba(255,255,255,0.03) }
+    .role{ font-size:11px; color:#93c5fd; margin-bottom:6px }
+    .text{ white-space:pre-wrap; color:#dbeafe }
+    .note{ margin-top:10px; font-size:12px; color:#94a3b8 }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>You're offline — saved explanations still available</h1>
+    <p>Below are the most recent saved AI responses from your device. They were stored locally while you used ElimuLink.</p>
+    <div id="content" class="messages">Loading saved messages…</div>
+    <div class="note">Tip: Reconnect to the internet to get fresh responses or install the app for offline access.</div>
+  </div>
+
+  <script>
+    (function(){
+      const container = document.getElementById('content');
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('elimulink_last_messages_'));
+      if(keys.length === 0){ container.innerHTML = '<div class="msg">No saved messages found on this device.</div>'; return; }
+      // show most recent chat first
+      keys.sort().reverse();
+      let html = '';
+      keys.forEach(key => {
+        try{
+          const data = JSON.parse(localStorage.getItem(key) || '[]');
+          if(!Array.isArray(data) || data.length === 0) return;
+          html += '<div class="msg"><div class="role">Chat: '+ key.replace('elimulink_last_messages_','') +'</div>';
+          data.slice(-6).forEach(m => { html += '<div class="text">'+ (m.text || m.content || '') +'</div>'; });
+          html += '</div>';
+        }catch(e){ /* ignore */ }
+      });
+      container.innerHTML = html || '<div class="msg">No readable messages found.</div>';
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1838 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { 
+  getFirestore, collection, doc, setDoc, getDoc, 
+  onSnapshot, query, addDoc, updateDoc, serverTimestamp 
+} from 'firebase/firestore';
+import { SplashScreen } from './SplashScreen';
+import { geminiAPI } from './services/geminiAPI';
+
+// --- CONFIG ---
+const API_KEY = ""; // Provided at runtime
+const MODEL_TEXT = "gemini-2.5-flash-preview-09-2025";
+const MODEL_IMAGE = "imagen-4.0-generate-001";
+const MODEL_TTS = "gemini-2.5-flash-preview-tts";
+
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const app = firebaseConfig.apiKey ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'elimulink-ultra-v2';
+
+// ============= INLINE SVG ICONS (NO LUCIDE-REACT) =============
+const BookIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/><path d="M3 2h18v2H3V2zm0 18h18v2H3v-2z"/>
+  </svg>
+);
+
+const HeartIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+  </svg>
+);
+
+const BuildingIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+  </svg>
+);
+
+const BriefcaseIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M20 6h-2.18c.11-.89.86-1.54 1.72-1.54.4 0 .77.152 1.02.41l1.45-1.44C22.2 2.92 21.3 2 20.15 2 18.36 2 16.88 3.32 16.64 5H7.36C7.12 3.32 5.64 2 3.85 2 2.7 2 1.8 2.92 2.99 4.41L4.44 5.85C4.69 5.56 5.02 5.54 5.46 5.46 6.32 5.46 7.07 6.11 7.18 7H5c-2.8 0-5 2.2-5 5v8c0 2.8 2.2 5 5 5h14c2.8 0 5-2.2 5-5v-8c0-2.8-2.2-5-5-5zm0 12h-4v4h-8v-4H4v-2h16v2z"/>
+  </svg>
+);
+
+const WalletIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+  </svg>
+);
+
+const ShuttleIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.22.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm11 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM5 11l1.5-4.5h11L19 11H5z"/>
+  </svg>
+);
+
+const IDCardIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H4V4h14v10zm-6-3.5c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm6 1.5c0-2-4-3-6-3s-6 1-6 3v1h12v-1z"/>
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+  </svg>
+);
+
+const SendIcon = () => (
+  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M16.6915026,12.4744748 L3.50612381,13.2599618 C3.19218622,13.2599618 3.03521743,13.4170592 3.03521743,13.5741566 L1.15159189,20.0151496 C0.8376543,20.8006365 0.99,21.89 1.77946707,22.52 C2.41,22.99 3.50612381,23.1 4.13399899,22.8429026 L21.714504,14.0454487 C22.6563168,13.5741566 23.1272231,12.6315722 22.9702544,11.6889879 C22.9702544,11.6889879 22.9702544,11.6889879 22.9702544,11.4318905 L4.13399899,2.63434996 C3.34915502,2.25325841 2.40734225,2.36337728 1.77946707,2.89206975 C0.994623095,3.5280802 0.837654326,4.61745453 1.15159189,5.40294149 L3.03521743,11.8439345 C3.03521743,12.0010319 3.19218622,12.1581292 3.50612381,12.1581292 L16.6915026,12.9436161 C16.6915026,12.9436161 17.1624089,12.9436161 17.1624089,12.4744748 C17.1624089,12.0053335 16.6915026,12.4744748 16.6915026,12.4744748 Z"/>
+  </svg>
+);
+
+// ============= LIBRARY MODULE WITH TARGETED EXTRACTION =============
+const libraryModule = {
+  books: {
+    'data-structures': {
+      title: 'Data Structures & Algorithms',
+      author: 'Mark Allen Weiss',
+      summary: 'A comprehensive guide to essential data structures and algorithm design patterns.',
+      keyTopics: ['Arrays', 'Linked Lists', 'Trees', 'Sorting', 'Graphs'],
+      targetedPillars: [
+        { pillar: 'Structure', focus: 'How data is organized (Arrays vs Trees)' },
+        { pillar: 'Operations', focus: 'Time complexity & access patterns (O(n) vs O(1))' },
+        { pillar: 'Application', focus: 'When to use each structure (Hashtable for lookups)' }
+      ],
+      realWorldExamples: [
+        'Facebook uses Graph data structures to represent friend connections',
+        'Google Maps uses Dijkstra\'s Algorithm for shortest path routing',
+        'Netflix uses Hash Tables for user recommendations lookup'
+      ],
+      pastExamQuestions: [
+        'Explain the difference between BFS and DFS. When would you use each?',
+        'Implement a binary search tree and write a function to find the kth smallest element.',
+        'Given an array of integers, find all pairs that sum to a target value. Optimize for O(n) time.',
+        'Explain why quicksort is faster than merge sort in practice despite same Big-O complexity.'
+      ]
+    },
+    'law-of-tort': {
+      title: 'Law of Tort',
+      author: 'Legal Studies',
+      summary: 'Understanding liability and civil remedies in tort law.',
+      keyTopics: ['Negligence', 'Strict Liability', 'Defamation', 'Nuisance'],
+      targetedPillars: [
+        { pillar: 'Duty', focus: 'Establishing a duty of care (Neighbor principle)' },
+        { pillar: 'Breach', focus: 'Proving breach of that duty (Standard of reasonable person)' },
+        { pillar: 'Damage', focus: 'Quantifying compensable harm (General vs Special damages)' }
+      ],
+      realWorldExamples: [
+        'Donoghue v Stevenson: Manufacturer liable for defective ginger beer bottle',
+        'Caparo Test: Establishing duty of care in professional negligence cases',
+        'Vicarious Liability: Employer responsible for employee negligent acts'
+      ],
+      pastExamQuestions: [
+        'Apply the three pillars of tort to a case: A driver runs a red light and hits a pedestrian. Discuss duty, breach, and damages.',
+        'Distinguish between negligence and strict liability with examples.',
+        'A surgeon performs surgery without consent. What tort is committed? What damages apply?'
+      ]
+    },
+    'software-engineering': {
+      title: 'Software Engineering Principles',
+      author: 'Andrew Hunt',
+      summary: 'Practical software development practices and design principles for scalable applications.',
+      keyTopics: ['Design Patterns', 'SOLID Principles', 'Testing', 'Refactoring', 'Documentation'],
+      targetedPillars: [
+        { pillar: 'Design', focus: 'Patterns & architecture (MVC, Singleton, Observer)' },
+        { pillar: 'Quality', focus: 'Testing & code standards (TDD, linting, documentation)' },
+        { pillar: 'Maintenance', focus: 'Refactoring & optimization (Debt reduction, performance)' }
+      ],
+      realWorldExamples: [
+        'MVC pattern used by Django, Rails, and Laravel frameworks',
+        'Singleton pattern used for database connections in production apps',
+        'Observer pattern used in event-driven systems like message queues'
+      ],
+      pastExamQuestions: [
+        'What is the difference between composition and inheritance? Give practical examples.',
+        'Explain SOLID principles and how they improve code maintainability.',
+        'Design a PaymentProcessor class. Which design patterns would you apply?',
+        'How would you refactor a 500-line function? What metrics would you track?'
+      ]
+    },
+    'web-development': {
+      title: 'Modern Web Development',
+      author: 'Kyle Simpson',
+      summary: 'Building scalable, responsive web applications with modern JavaScript and frameworks.',
+      keyTopics: ['React', 'State Management', 'APIs', 'Performance', 'Security'],
+      targetedPillars: [
+        { pillar: 'Frontend', focus: 'UI frameworks & component design (React, Vue, Angular)' },
+        { pillar: 'Backend', focus: 'APIs & data management (REST, GraphQL, databases)' },
+        { pillar: 'Deployment', focus: 'Performance & security (Caching, HTTPS, monitoring)' }
+      ],
+      realWorldExamples: [
+        'React hooks used by Airbnb to manage component state elegantly',
+        'Webpack bundling used by Spotify to optimize load times',
+        'REST API design patterns used by Stripe for payment processing'
+      ],
+      pastExamQuestions: [
+        'Build a todo app with React. Implement add, delete, and filter functionality.',
+        'Explain virtual DOM. Why does React use it?',
+        'How would you optimize a React component that re-renders unnecessarily?',
+        'Design a REST API for an e-commerce platform. Include error handling.'
+      ]
+    }
+  },
+
+  searchBook: function(query) {
+    const lowerQuery = query.toLowerCase();
+    for (const [key, book] of Object.entries(this.books)) {
+      if (lowerQuery.includes(key.replace('-', ' ')) || 
+          lowerQuery.includes(book.title.toLowerCase()) ||
+          book.keyTopics.some(topic => lowerQuery.includes(topic.toLowerCase()))) {
+        return { found: true, bookKey: key, ...book };
+      }
+    }
+    return { found: false };
+  }
+};
+
+// ============= CRISIS KEYWORDS =============
+const CRISIS_KEYWORDS = ['suicide', 'kill myself', 'harm', 'self harm', 'overdose', 'depression crisis', 'panic attack', 'cannot breathe'];
+const SENSITIVE_KEYWORDS = ['pregnancy', 'pregnant', 'abortion', 'abuse', 'assault', 'depression', 'anxiety', 'mental health crisis'];
+
+// ============= SEKU INSTITUTIONAL DATA =============
+const SEKU_DATA = {
+  welfare: {
+    dean: { name: 'Dr. Sedina Misango', title: 'Dean of Students', phone: '+254 712 345 678', office: 'Admin Building, 1st Floor' },
+    counselor: { name: 'Dr. Albert Muoki', title: 'Head, Counseling Dept', phone: '+254 712 987 654', office: 'Health Center, Building A' }
+  },
+  hostels: {
+    boys: [
+      { name: 'Elementaita', rooms: 'E1-E50' },
+      { name: 'Turkwel', rooms: 'T1-T45' },
+      { name: 'Turkana', rooms: 'TK1-TK60' },
+      { name: 'Baringo', rooms: 'B1-B50' }
+    ],
+    girls: [
+      { name: 'Victoria', rooms: '403 cubes' },
+      { name: 'Yatta', rooms: 'Units 1-5' }
+    ]
+  },
+  payments: {
+    mess: [
+      { name: 'Victoria Mess 1', paybill: '345673', hostel: 'Victoria' },
+      { name: 'Turkana Mess', paybill: '878978', hostel: 'Turkana' }
+    ],
+    shops: [
+      { name: 'Victoria Shops (47, 48, 49)', paybills: ['123456', '45672656', '453763'] },
+      { name: 'Turkana Shop 10', paybill: '6543900', hostel: 'Turkana' },
+      { name: 'Elementaita Shop 13', paybill: '9876587', hostel: 'Elementaita' },
+      { name: 'Turkwel Shop 12', paybill: '7654345', hostel: 'Turkwel' }
+    ]
+  },
+  campus: {
+    tuitionBlock1: {
+      name: 'Tuition Block 1',
+      buildings: [
+        { name: 'Finance Office', room: 'FB1-01' },
+        { name: 'Registrar', room: 'FB1-02' },
+        { name: 'Lecture Hall 1', room: 'LH1' },
+        { name: 'Lecture Hall 2', room: 'LH2' },
+        { name: 'Lecture Hall 3', room: 'LH3' }
+      ]
+    },
+    tuitionBlock2: {
+      name: 'Tuition Block 2',
+      buildings: [
+        { name: 'Lecture Hall 4', room: 'LH4' },
+        { name: 'Lecture Hall 5', room: 'LH5' },
+        { name: 'Lecture Hall 6', room: 'LH6' },
+        { name: 'Lecture Hall 7', room: 'LH7' },
+        { name: 'Lecture Hall 8', room: 'LH8' },
+        { name: 'Lecture Hall 9', room: 'LH9' },
+        { name: 'Lecture Hall 10', room: 'LH10' }
+      ]
+    }
+  }
+};
+
+const App = () => {
+  // GLOBAL STATE
+  const [activeTab, setActiveTab] = useState('library');
+  const [showSplash, setShowSplash] = useState(true);
+
+  // STEALTH UI STATE
+  const [welcomeMessageIndex, setWelcomeMessageIndex] = useState(0);
+  const [welcomeFade, setWelcomeFade] = useState(1);
+
+  // VOICE INTERACTION STATE
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const recognitionRef = React.useRef(null);
+  const synthRef = React.useRef(null);
+
+  // IMAGE & VIDEO GENERATION STATE
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState({});
+
+  // Initialize Speech APIs
+  React.useEffect(() => {
+    // Check Web Speech API support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setVoiceSupported(true);
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+    }
+
+    // Speech Synthesis (always available)
+    synthRef.current = window.speechSynthesis;
+  }, []);
+
+  const welcomeMessages = [
+    '💚 Welcome to ElimuLink... Ask me about Library',
+    '📚 Welcome to ElimuLink... Ask me about Books & Exams',
+    '🏠 Welcome to ElimuLink... Ask me about Hostels',
+    '💰 Welcome to ElimuLink... Ask me about Services & Transport',
+    '💙 Welcome to ElimuLink... Ask me about Counseling & Wellness'
+  ];
+
+  // Auto-rotate welcome messages every 3 seconds
+  React.useEffect(() => {
+    const fadeInterval = setInterval(() => {
+      setWelcomeFade(0);
+      setTimeout(() => {
+        setWelcomeMessageIndex(prev => (prev + 1) % welcomeMessages.length);
+        setWelcomeFade(1);
+      }, 500);
+    }, 3000);
+    return () => clearInterval(fadeInterval);
+  }, []);
+
+  // LIBRARY STATE
+  const [libraryInput, setLibraryInput] = useState('');
+  const [libraryMessages, setLibraryMessages] = useState([
+    { role: 'ai', text: 'Welcome John! 📚 Ask me about any book or topic. I\'ll provide summaries, real-world examples, and past exam questions.', isWelcome: true }
+  ]);
+  const [showLibraryWelcome, setShowLibraryWelcome] = useState(true);
+
+  // WELFARE STATE
+  const [welfareSubTab, setWelfareSubTab] = useState('counseling'); // counseling, medical, hostels, career, payments, campus
+  const [counselingMessages, setCounselingMessages] = useState([
+    { role: 'ai', text: '💚 Welcome to Safe Space. This is a confidential counseling mode. Share what\'s on your mind.', isWelcome: true }
+  ]);
+  const [counselingInput, setCounselingInput] = useState('');
+  const [showCrisisAlert, setShowCrisisAlert] = useState(false);
+
+  const [medicalSymptoms, setMedicalSymptoms] = useState('');
+  const [triageResult, setTriageResult] = useState(null);
+
+  // HOSTEL STATE
+  const [hostelGender, setHostelGender] = useState('boys');
+  const [selectedHostel, setSelectedHostel] = useState('Elementaita');
+  const [hostelIssue, setHostelIssue] = useState('');
+  const [hostelTickets, setHostelTickets] = useState([]);
+
+  const [logbookEntry, setLogbookEntry] = useState('');
+  const [logbookAIResponse, setLogbookAIResponse] = useState(null);
+
+  // STUDENT SERVICES STATE
+  const [studentServicesSubTab, setStudentServicesSubTab] = useState('financial');
+  const [graduationChecklist, setGraduationChecklist] = useState([
+    { id: 1, item: 'Return all library books', completed: false },
+    { id: 2, item: 'Clear outstanding finance balance', completed: false },
+    { id: 3, item: 'Complete all department units', completed: false },
+    { id: 4, item: 'Get department clearance signature', completed: false },
+    { id: 5, item: 'Obtain library clearance certificate', completed: false },
+    { id: 6, item: 'Pay all hostel deposits', completed: false },
+    { id: 7, item: 'Submit final project/thesis', completed: false },
+    { id: 8, item: 'Attend graduation orientation', completed: false }
+  ]);
+
+  // ADMIN STATE
+  const [logoClickCount, setLogoClickCount] = useState(0);
+  const [showAdminAuth, setShowAdminAuth] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminPasswordError, setAdminPasswordError] = useState('');
+
+  // Mock Analytics Data
+  const [analyticsData] = useState({
+    hostelRepairs: [
+      { hostel: 'Turkana', tickets: 15, status: '🔴 Critical' },
+      { hostel: 'Elementaita', tickets: 8, status: '🟡 Normal' },
+      { hostel: 'Victoria', tickets: 5, status: '🟢 Good' },
+      { hostel: 'Turkwel', tickets: 3, status: '🟢 Good' },
+      { hostel: 'Yatta', tickets: 2, status: '🟢 Good' },
+      { hostel: 'Baringo', tickets: 6, status: '🟡 Normal' }
+    ],
+    studentSentiment: {
+      stress: 68, // percentage
+      anxiety: 45,
+      happiness: 72
+    },
+    feeQuestions: [
+      { topic: 'Tuition Payment Deadlines', count: 32 },
+      { topic: 'Mess Fee Refunds', count: 28 },
+      { topic: 'Hostel Deposit Issues', count: 19 },
+      { topic: 'Late Payment Penalties', count: 15 },
+      { topic: 'Scholarship Status', count: 12 }
+    ]
+  });
+
+  const studentData = {
+    name: "John Doe",
+    regNo: "SEKU/BIT/001/2024",
+    room: "H12-205"
+  };
+
+  // ============= LIBRARY HANDLERS =============
+  const handleLibrarySend = () => {
+    if (!libraryInput.trim()) return;
+    
+    const userMsg = { role: 'user', text: libraryInput };
+    setLibraryMessages(prev => [...prev, userMsg]);
+    const query = libraryInput;
+    
+    // SMART ROUTING: Detect category and switch tabs
+    applySmartRouting(query);
+
+    // IMAGE GENERATION DETECTION
+    const imageKeywords = ['generate image', 'create image', 'draw', 'picture', 'visual', 'diagram', 'sketch', 'show me a'];
+    const shouldGenerateImage = imageKeywords.some(kw => query.toLowerCase().includes(kw));
+
+    // VIDEO GENERATION DETECTION
+    const videoKeywords = ['generate video', 'create video', 'video', 'show video', 'animate'];
+    const shouldGenerateVideo = videoKeywords.some(kw => query.toLowerCase().includes(kw));
+
+    // RESEARCH QUERY DETECTION
+    const isResearchQuery = query.toLowerCase().includes('research') || query.toLowerCase().includes('kampala') || query.toLowerCase().includes('uganda');
+    
+    setLibraryInput('');
+    setShowLibraryWelcome(false);
+
+    setTimeout(async () => {
+      let result = null;
+      if (import.meta.env.VITE_GEMINI_API_KEY) {
+        result = await geminiAPI.searchBook(query);
+      }
+      if (!result || !result.found) {
+        result = libraryModule.searchBook(query);
+      }
+
+      let aiResponse;
+      if (result && result.found) {
+        aiResponse = {
+          role: 'ai',
+          type: 'library',
+          book: result.title,
+          targetedPillars: result.targetedPillars || [],
+          sections: [
+            { title: '📖 Summary', content: result.summary },
+            { title: '🔑 Key Topics', content: result.keyTopics.join(' • ') },
+            { title: '🌍 Real-World Examples', items: result.realWorldExamples },
+            { title: '📝 Exam Questions', items: result.pastExamQuestions }
+          ]
+        };
+      } else {
+        aiResponse = {
+          role: 'ai',
+          text: '🤔 Try asking about "Data Structures", "Law of Tort", "Software Engineering", or "Web Development"'
+        };
+      }
+      setLibraryMessages(prev => [...prev, aiResponse]);
+
+      // TRIGGER IMAGE GENERATION
+      if (shouldGenerateImage) {
+        setTimeout(async () => {
+          const imageUrl = await generateImage(query);
+          if (imageUrl) {
+            setLibraryMessages(prev => [...prev, {
+              role: 'ai',
+              text: `🎨 Generated image for: "${query}"\n\nNote: Using placeholder service. Production would use Imagen-4 API.`,
+              image: imageUrl
+            }]);
+          }
+        }, 500);
+      }
+
+      // TRIGGER VIDEO GENERATION
+      if (shouldGenerateVideo) {
+        setTimeout(async () => {
+          const videoInfo = await generateVideo(query);
+          if (videoInfo) {
+            setLibraryMessages(prev => [...prev, {
+              role: 'ai',
+              text: `🎬 Video generation initiated for: "${query}"\n\n📺 Status: ${videoInfo.status}\n⏱️ Duration: ${videoInfo.duration}s\n\nNote: Using placeholder. Production would call video generation API.`
+            }]);
+          }
+        }, 800);
+      }
+
+      // TRIGGER RESEARCH QUERY
+      if (isResearchQuery) {
+        setTimeout(async () => {
+          const researchResponse = await performDualBrainSearch(query);
+          setLibraryMessages(prev => [...prev, {
+            role: 'ai',
+            text: researchResponse
+          }]);
+        }, 1100);
+      }
+    }, 800);
+  };
+
+  // ============= WELFARE: COUNSELING HANDLERS =============
+  const handleCounselingSend = () => {
+    if (!counselingInput.trim()) return;
+
+    const lowerInput = counselingInput.toLowerCase();
+    
+    // SMART ROUTING: Detect category and switch tabs if needed
+    applySmartRouting(counselingInput);
+
+    const hasCrisisKeywords = CRISIS_KEYWORDS.some(kw => lowerInput.includes(kw));
+    const hasSensitiveKeywords = SENSITIVE_KEYWORDS.some(kw => lowerInput.includes(kw));
+
+    if (hasCrisisKeywords) {
+      setShowCrisisAlert(true);
+    }
+
+    const userMsg = { role: 'user', text: counselingInput };
+    setCounselingMessages(prev => [...prev, userMsg]);
+    setCounselingInput('');
+
+    setTimeout(async () => {
+      let aiResponse = '';
+
+      if (hasCrisisKeywords) {
+        // CRISIS PROTOCOL - IMMEDIATE SUPPORT
+        aiResponse = `🚨 **CRISIS SUPPORT - Please Reach Out Now**\n\nI'm deeply concerned about what you've shared. You are not alone, and help is available immediately.\n\n**CONTACT IMMEDIATELY:**\n☎️ Dr. Albert Muoki (Counseling Dept)\nPhone: ${SEKU_DATA.welfare.counselor.phone}\nLocation: ${SEKU_DATA.welfare.counselor.office}\n\n📍 Dr. Sedina Misango (Dean of Students)  \nPhone: ${SEKU_DATA.welfare.dean.phone}\nLocation: ${SEKU_DATA.welfare.dean.office}\n\n**Emergency Services:** Call 999 or visit the nearest hospital\n\nThe university has 24/7 counseling support, trained professionals, and comprehensive crisis intervention services. You deserve professional care, and it's available to you right now.`;
+      } else if (hasSensitiveKeywords) {
+        // SENSITIVE TOPIC PROTOCOL
+        let sensitiveResponse = `💙 **Thank you for trusting me with this sensitive topic.**\n\nI want you to know that the university provides complete, confidential support:\n\n**SPEAK WITH OUR COUNSELORS:**\n☎️ **Dr. Albert Muoki** (Counseling Dept)\nPhone: ${SEKU_DATA.welfare.counselor.phone}\n\n📍 **Dr. Sedina Misango** (Dean of Students)\nPhone: ${SEKU_DATA.welfare.dean.phone}\n\n`;
+
+        if (lowerInput.includes('pregnancy') || lowerInput.includes('pregnant')) {
+          sensitiveResponse += `**About Pregnancy Support:**\nThe university understands that unplanned pregnancies present significant challenges. Kenya's laws restrict abortion access, BUT SEKU provides:\n\n✓ Full medical examination and healthcare\n✓ Psychological counseling (100% confidential)\n✓ Social support and options counseling\n✓ Financial assistance for medical care\n✓ Academic accommodations if needed\n✓ Continuation of studies with support\n\nYou have options, and professionals are ready to help you navigate them safely.`;
+        } else if (lowerInput.includes('abortion')) {
+          sensitiveResponse += `**Legal & Health Context:**\nIn Kenya, abortion is restricted by law. However, SEKU's medical team:\n\n✓ Provides full pre- and post-care support\n✓ Ensures your physical and mental health is protected\n✓ Maintains complete confidentiality\n✓ Offers counseling throughout the process\n✓ Provides ongoing psychological support\n\nReach out to Dr. Muoki or Dr. Misango to discuss your specific situation and available resources.`;
+        } else if (lowerInput.includes('depression') || lowerInput.includes('anxiety')) {
+          sensitiveResponse += `**Mental Health Support Available:**\n✓ Counseling sessions (free & confidential)\n✓ Psychiatric evaluation if needed\n✓ Support groups and peer counseling\n✓ Academic accommodations\n✓ Crisis intervention 24/7\n\nWhat you're experiencing is treatable. Professional help makes a real difference.`;
+        } else if (lowerInput.includes('abuse') || lowerInput.includes('assault')) {
+          sensitiveResponse += `**Safety & Support:**\n✓ Immediate safety planning\n✓ Medical examination & treatment\n✓ Confidential counseling\n✓ Reporting support (your choice)\n✓ Legal assistance available\n✓ Emergency accommodation if needed\n\nYou are not alone, and this was not your fault. Professional support is available immediately.`;
+        }
+
+        aiResponse = sensitiveResponse;
+      } else {
+        // REGULAR COUNSELING - AI RESPONSE
+        const counselingPrompt = `You are a compassionate university counselor for SEKU. The student says: "${lowerInput}". Provide a warm, helpful response that:
+1. Validates their feelings with genuine empathy
+2. Offers specific, actionable advice for their situation
+3. References campus resources (counseling office, health center, academic support, peer support)
+4. Suggests stress-management or wellness techniques
+5. Encourages them to take next steps
+6. IMPORTANT: Avoid generic phrases like "I'm here to listen" - provide specific, varied advice based on their unique situation
+
+Keep responses practical, warm, and resource-rich. Every response should be different and tailored.`;
+
+        aiResponse = await geminiAPI.searchBook(counselingPrompt) || `I hear you. The university has many resources to support you—counselors, health services, academic advisors, and peer support groups. What specific area would you like help with?`;
+      }
+
+      setCounselingMessages(prev => [...prev, { role: 'ai', text: aiResponse }]);
+    }, 800);
+  };
+
+  // ============= WELFARE: MEDICAL HANDLERS =============
+  const handleSmartTriage = async () => {
+    if (!medicalSymptoms.trim()) return;
+
+    if (import.meta.env.VITE_GEMINI_API_KEY) {
+      const result = await geminiAPI.searchBook(`Medical triage: ${medicalSymptoms}`);
+      setTriageResult({
+        symptoms: medicalSymptoms,
+        recommendation: result.found ? result.summary : 'Please visit the health center for proper examination.'
+      });
+    } else {
+      setTriageResult({
+        symptoms: medicalSymptoms,
+        recommendation: '⚠️ Please visit the Health Center at Building A, 2nd Floor. Hours: 8 AM - 5 PM'
+      });
+    }
+  };
+
+  // ============= WELFARE: HOSTEL HANDLERS =============
+  // ============= WELFARE: HOSTEL HANDLERS =============
+  const handleCreateHostelTicket = () => {
+    if (!hostelIssue.trim()) return;
+
+    const newTicket = {
+      id: Date.now(),
+      hostel: selectedHostel,
+      issue: hostelIssue,
+      status: 'Open',
+      createdAt: new Date().toLocaleDateString()
+    };
+
+    setHostelTickets(prev => [...prev, newTicket]);
+    setHostelIssue('');
+  };
+
+  // ============= WELFARE: CAREER HANDLERS =============
+  const handleLogbookAssist = async () => {
+    if (!logbookEntry.trim()) return;
+
+    const nitaPrompt = `NITA Attachment Logbook Entry (Engineering/Business).${logbookEntry}. Improve this entry with: Date, Tasks completed, Skills learned, Challenges faced, Solutions applied.`;
+
+    if (import.meta.env.VITE_GEMINI_API_KEY) {
+      const result = await geminiAPI.searchBook(nitaPrompt);
+      setLogbookAIResponse({
+        originalEntry: logbookEntry,
+        improvedVersion: result.found ? result.summary : logbookEntry,
+        feedback: 'NITA Format: Include attachment period, deliverables, and competencies gained.'
+      });
+    } else {
+      setLogbookAIResponse({
+        originalEntry: logbookEntry,
+        improvedVersion: logbookEntry,
+        feedback: 'NITA Logbook Tips: Daily entries, Technical skills, Challenges & Solutions, Supervisor sign-off.'
+      });
+    }
+  };
+
+  // ============= ADMIN: HANDLERS =============
+  const handleLogoClick = () => {
+    const newCount = logoClickCount + 1;
+    setLogoClickCount(newCount);
+    if (newCount === 5) {
+      setShowAdminAuth(true);
+      setLogoClickCount(0);
+    }
+  };
+
+  const handleAdminLogin = () => {
+    setAdminPasswordError('');
+    if (adminPassword === 'SEKU-ADMIN-2024') {
+      setIsAdminAuthenticated(true);
+      setAdminPassword('');
+      setShowAdminAuth(false);
+    } else {
+      setAdminPasswordError('❌ Incorrect password. Try again.');
+      setAdminPassword('');
+    }
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdminAuthenticated(false);
+    setActiveTab('library');
+  };
+
+  // ============= GRADUATION CHECKLIST HANDLERS =============
+  const toggleChecklistItem = (id) => {
+    setGraduationChecklist(prev =>
+      prev.map(item => item.id === id ? { ...item, completed: !item.completed } : item)
+    );
+  };
+
+  const getGraduationProgress = () => {
+    const completed = graduationChecklist.filter(item => item.completed).length;
+    return Math.round((completed / graduationChecklist.length) * 100);
+  };
+
+  // ============= SMART ROUTING: AUTO-CATEGORIZE MESSAGES =============
+  const detectMessageCategory = (text) => {
+    const lowerText = text.toLowerCase();
+    
+    // HOSTEL KEYWORDS
+    if (lowerText.match(/water|leaks?|broken|tap|window|electrical|maintenance|room|hostel|dorm|plumbing|shower|toilet|bed|furniture|noise|heating|cooling/i)) {
+      return 'hostel'; // But we'll use 'welfare' with hostel subtab
+    }
+    
+    // LIBRARY/ACADEMIC KEYWORDS
+    if (lowerText.match(/book|library|notes|study|exam|chapter|reading|textbook|pdf|assignment|homework|research|draft|essay|lecture|course material/i)) {
+      return 'library';
+    }
+    
+    // WELFARE/COUNSELING KEYWORDS
+    if (lowerText.match(/stress|anxious|depression|worried|sad|counseling|mental|health|doctor|muoki|dean|sedina|therapy|support|pressure|overwhelmed|crisis|suicide|harm/i)) {
+      return 'welfare';
+    }
+    
+    // SERVICES/TRANSPORT KEYWORDS
+    if (lowerText.match(/paybill|shuttle|transport|money|fee|payment|m-pesa|bus|transport|airport|town|shopping|shop|mess|food|dining/i)) {
+      return 'services';
+    }
+    
+    // CAREER/LOGBOOK KEYWORDS
+    if (lowerText.match(/nita|logbook|attachment|career|job|internship|engineering|business|skills|experience|company|workplace/i)) {
+      return 'career';
+    }
+    
+    // GRADUATION KEYWORDS
+    if (lowerText.match(/graduation|graduate|clearance|audit|checklist|books return|finance|department|library certificate|hostel deposit/i)) {
+      return 'graduation';
+    }
+    
+    return 'library'; // Default
+  };
+
+  // ============= VOICE INTERACTION HANDLERS =============
+  const startVoiceListening = () => {
+    if (!voiceSupported || !recognitionRef.current) return;
+
+    setIsListening(true);
+    let transcript = '';
+
+    recognitionRef.current.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognitionRef.current.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsListening(false);
+      if (transcript.trim()) {
+        setLibraryInput(transcript);
+        // Auto-send after speech recognition completes
+        setTimeout(() => {
+          // Trigger send after a brief delay
+          const temp = transcript;
+          handleLibrarySend();
+        }, 100);
+      }
+    };
+
+    recognitionRef.current.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+    };
+
+    recognitionRef.current.start();
+  };
+
+  const stopVoiceListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+  };
+
+  // Text-to-Speech: Read AI response out loud
+  const speakMessage = (text) => {
+    if (!synthRef.current) return;
+
+    // Cancel any ongoing speech
+    synthRef.current.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    synthRef.current.speak(utterance);
+  };
+
+  // ============= IMAGE & VIDEO GENERATION HANDLERS =============
+  const generateImage = async (prompt) => {
+    setIsGeneratingImage(true);
+    try {
+      // For now, we'll simulate image generation
+      // In production, this would call Google's Imagen-4 API
+      // Example: https://cloud.google.com/vertex-ai/generative-ai/docs/model-garden/image-generation-api
+
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Create a placeholder image using canvas or placeholder service
+      const placeholderImage = `https://via.placeholder.com/400x300?text=${encodeURIComponent(prompt.substring(0, 30))}`;
+
+      setGeneratedImages(prev => ({
+        ...prev,
+        [prompt]: placeholderImage
+      }));
+
+      return placeholderImage;
+    } catch (error) {
+      console.error('Image generation error:', error);
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const generateVideo = async (prompt) => {
+    setIsGeneratingVideo(true);
+    try {
+      // Simulate video generation
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      // In production, this would call a video generation API
+      // For now, return a placeholder
+      return { status: 'generating', prompt, duration: 30 };
+    } catch (error) {
+      console.error('Video generation error:', error);
+    } finally {
+      setIsGeneratingVideo(false);
+    }
+  };
+
+  // ============= DUAL-BRAIN RESEARCH: INTERNAL + EXTERNAL QUERIES =============
+  const performDualBrainSearch = async (query) => {
+    // Determine if this is an external topic (places, events, general knowledge)
+    const externalKeywords = ['kampala', 'uganda', 'nairobi', 'kenya', 'town', 'city', 'world', 'weather', 'news', 'current'];
+    const isExternalQuery = externalKeywords.some(kw => query.toLowerCase().includes(kw));
+
+    let response = '';
+
+    if (isExternalQuery) {
+      // Use Google Search grounding for external queries
+      response = `🌍 **Research Mode: External + Internal**\n\n`;
+      response += `📍 **Real-World Data** (via Google Search):\nSearching for "${query}" across global sources...\n\n`;
+      response += `For location/travel queries, I would use:\n- Google Maps API for locations\n- Weather services for climate data\n- Current events data\n\n`;
+      response += `🏫 **SEKU-Specific Data**:\nCombining with campus information from our institutional database.\n`;
+      response += `\nNote: For production deployment, integrate Google Search API with grounding tools for real-time accuracy.`;
+    } else {
+      // Internal SEKU data
+      response = `🏫 **Internal SEKU Database Query**\n\nSearching our institutional knowledge base for: "${query}"`;
+    }
+
+    return response;
+  };
+
+  // Apply smart routing when user sends a message
+  const applySmartRouting = (messageText) => {
+    const category = detectMessageCategory(messageText);
+    
+    // Map categories to actual tabs
+    const categoryToTab = {
+      'hostel': 'welfare',
+      'library': 'library',
+      'welfare': 'welfare',
+      'services': 'services',
+      'career': 'career',
+      'graduation': 'graduation'
+    };
+    
+    const targetTab = categoryToTab[category];
+    if (targetTab) {
+      setActiveTab(targetTab);
+      
+      // If it's a hostel question, also set the welfare subtab
+      if (category === 'hostel') {
+        setWelfareSubTab('hostels');
+      }
+    }
+  };
+
+  const generateSenateBrief = () => {
+    const totalTickets = analyticsData.hostelRepairs.reduce((sum, h) => sum + h.tickets, 0);
+    const avgStress = Math.round((analyticsData.studentSentiment.stress + analyticsData.studentSentiment.anxiety) / 2);
+    const topFeeIssue = analyticsData.feeQuestions[0];
+    const criticalHostels = analyticsData.hostelRepairs.filter(h => h.tickets > 10);
+
+    const brief = `════════════════════════════════════════════════════════════════
+SEKU EXECUTIVE INTELLIGENCE BRIEF
+Generated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+Confidential - Vice-Chancellor Review Only
+════════════════════════════════════════════════════════════════
+
+📊 FACILITIES & INFRASTRUCTURE STATUS:
+
+Total Maintenance Requests: ${totalTickets} across all 6 hostels
+Critical Alert Count: ${criticalHostels.length} hostels
+
+HOSTEL-BY-HOSTEL BREAKDOWN:
+${analyticsData.hostelRepairs.map(h => `  • ${h.hostel}: ${h.tickets} tickets [${h.status}]`).join('\n')}
+
+CRITICAL ISSUE: Turkana Hall with 15 maintenance requests
+  - Priority repairs: Electrical systems, plumbing, structural leaks
+  - Estimated cost: KES 2.8M
+  - Timeline recommendation: 3 weeks
+
+ACTION REQUIRED: Allocate emergency maintenance budget for immediate repairs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💭 STUDENT WELLNESS & COUNSELING PULSE:
+
+Current Emotional Metrics:
+  • Stress Level: ${analyticsData.studentSentiment.stress}% (${analyticsData.studentSentiment.stress > 60 ? 'ELEVATED' : 'MODERATE'})
+  • Anxiety Index: ${analyticsData.studentSentiment.anxiety}% (${analyticsData.studentSentiment.anxiety > 50 ? 'HEIGHTENED' : 'NORMAL'})
+  • Happiness Index: ${analyticsData.studentSentiment.happiness}% (Stable)
+
+Key Findings:
+  ✗ Elevated stress during exam periods
+  ✗ Hostel condition concerns impacting wellbeing
+  ✗ Financial pressure contributing to anxiety
+  ✓ Counseling services well-utilized (+34% uptake)
+
+RECOMMENDATION: Enhance mental health support during peak periods
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 FINANCIAL QUESTIONS & STUDENT FEEDBACK:
+
+Top 5 Student Concerns:
+${analyticsData.feeQuestions.slice(0, 5).map((q, i) => `  ${i + 1}. "${q.topic}" - ${q.count} inquiries`).join('\n')}
+
+Key Issues:
+  • Payment deadline clarity needed
+  • Penalty and late fee concerns
+  • Scholarship status transparency
+  • Financial aid processes unclear
+
+STRATEGIC RECOMMENDATIONS:
+  1. Implement automated payment reminder system
+  2. Create flexible installment payment plans
+  3. Publish fee schedules with penalty amnesty periods
+  4. Establish scholarship information portal
+  5. Monthly student finance forums
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 EXECUTIVE RECOMMENDATIONS:
+
+IMMEDIATE (This Week):
+  ☐ Approve emergency Turkana Hall repair budget
+  ☐ Schedule hostel maintenance audit
+  ☐ Launch automated payment reminder system
+
+SHORT-TERM (This Month):
+  ☐ Expand counseling hours (evening/weekend sessions)
+  ☐ Host student finance transparency forum
+  ☐ Complete critical hostel repairs
+  ☐ Student wellness survey administration
+
+MID-TERM (Next Quarter):
+  ☐ Implement flexible payment plans
+  ☐ Upgrade hostel infrastructure (preventive maintenance)
+  ☐ Enhanced peer support programs
+  ☐ Career guidance integration
+
+════════════════════════════════════════════════════════════════
+REPORT STATUS: COMPLETE
+Generated by: ElimuLink Executive Intelligence System v2.0
+Next Brief: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+════════════════════════════════════════════════════════════════`;
+
+    const element = document.createElement('a');
+    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(brief));
+    element.setAttribute('download', `SEKU-Executive-Brief-${new Date().toISOString().split('T')[0]}.txt`);
+    element.style.display = 'none';
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  // ============= RENDER: STUDENT SERVICES TAB =============
+  const renderStudentServicesTab = () => (
+    <div className="flex flex-col h-full">
+      {/* Sub-tabs */}
+      <div className="flex gap-2 p-2 bg-slate-100 border-b border-slate-200 overflow-x-auto">
+        {[
+          { id: 'financial', label: '💰 Financial Wallet' },
+          { id: 'logistics', label: '🚌 Logistics' },
+          { id: 'digital-id', label: '🆔 Digital ID' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setStudentServicesSubTab(tab.id)}
+            className={`px-3 py-2 rounded text-sm font-semibold whitespace-nowrap ${studentServicesSubTab === tab.id ? 'bg-blue-500 text-white' : 'bg-white text-slate-700'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {studentServicesSubTab === 'financial' && (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-300">
+              <h3 className="font-bold text-slate-900 mb-1">💰 M-Pesa Paybills</h3>
+              <p className="text-sm text-slate-700 mb-4">Quick access to all hostel messes and shop payments</p>
+            </div>
+
+            {/* Victoria Mess */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border-l-4 border-blue-500">
+              <h4 className="font-bold text-slate-900 mb-2">🏫 Victoria Mess</h4>
+              <div className="bg-white p-3 rounded border border-blue-200">
+                <p className="text-sm text-slate-700 mb-1">Paybill Number:</p>
+                <p className="text-2xl font-mono font-bold text-blue-600">345673</p>
+                <p className="text-xs text-slate-600 mt-2">Meal deductions & dining credits</p>
+              </div>
+            </div>
+
+            {/* Turkana Mess */}
+            <div className="p-4 bg-gradient-to-r from-green-50 to-green-100 rounded-lg border-l-4 border-green-500">
+              <h4 className="font-bold text-slate-900 mb-2">🏫 Turkana Mess</h4>
+              <div className="bg-white p-3 rounded border border-green-200">
+                <p className="text-sm text-slate-700 mb-1">Paybill Number:</p>
+                <p className="text-2xl font-mono font-bold text-green-600">878978</p>
+                <p className="text-xs text-slate-600 mt-2">Meal deductions & dining credits</p>
+              </div>
+            </div>
+
+            {/* Hostel Shops */}
+            <div className="p-4 bg-gradient-to-r from-amber-50 to-amber-100 rounded-lg border-l-4 border-amber-500">
+              <h4 className="font-bold text-slate-900 mb-3">🛒 Hostel Shops</h4>
+              <div className="space-y-2">
+                <div className="bg-white p-3 rounded border border-amber-200">
+                  <p className="text-sm font-semibold text-slate-900">Elementaita Shop 13</p>
+                  <p className="text-lg font-mono font-bold text-amber-600">9876587</p>
+                </div>
+                <div className="bg-white p-3 rounded border border-amber-200">
+                  <p className="text-sm font-semibold text-slate-900">Turkwel Shop 12</p>
+                  <p className="text-lg font-mono font-bold text-amber-600">7654345</p>
+                </div>
+                <div className="bg-white p-3 rounded border border-amber-200">
+                  <p className="text-sm font-semibold text-slate-900">Turkana Shop 10</p>
+                  <p className="text-lg font-mono font-bold text-amber-600">6543900</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-300 text-sm">
+              <p className="font-semibold text-yellow-900 mb-1">💡 Tip:</p>
+              <p className="text-yellow-800">Save these numbers to your phone for quick M-Pesa payments. Confirm amount before sending.</p>
+            </div>
+          </div>
+        )}
+
+        {studentServicesSubTab === 'logistics' && (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-300">
+              <h3 className="font-bold text-slate-900 mb-1">🚌 SEKU Shuttle Timetable</h3>
+              <p className="text-sm text-slate-700">Live transport schedule across campus and town routes</p>
+            </div>
+
+            {/* Shuttle Routes */}
+            <div className="p-4 bg-gradient-to-r from-indigo-50 to-indigo-100 rounded-lg border-l-4 border-indigo-500">
+              <h4 className="font-bold text-slate-900 mb-3">🚌 Campus Routes</h4>
+              <div className="space-y-3">
+                <div className="bg-white p-3 rounded border border-indigo-200">
+                  <p className="font-semibold text-slate-900">Main Gate → Town Center</p>
+                  <p className="text-sm text-slate-700 mt-1">⏱️ Duration: <span className="font-bold text-indigo-600">15 mins</span></p>
+                  <p className="text-xs text-slate-600 mt-1">Departs: 7:30 AM, 10:00 AM, 1:00 PM, 4:00 PM, 6:30 PM</p>
+                </div>
+                <div className="bg-white p-3 rounded border border-indigo-200">
+                  <p className="font-semibold text-slate-900">Library → Hostels Circuit</p>
+                  <p className="text-sm text-slate-700 mt-1">⏱️ Duration: <span className="font-bold text-indigo-600">8 mins</span></p>
+                  <p className="text-xs text-slate-600 mt-1">Departs: 8:00 AM, 12:00 PM, 3:00 PM, 5:30 PM</p>
+                </div>
+                <div className="bg-white p-3 rounded border border-indigo-200">
+                  <p className="font-semibold text-slate-900">Tuition Blocks → Main Gate</p>
+                  <p className="text-sm text-slate-700 mt-1">⏱️ Duration: <span className="font-bold text-indigo-600">12 mins</span></p>
+                  <p className="text-xs text-slate-600 mt-1">Departs: 9:00 AM, 11:00 AM, 2:00 PM, 5:00 PM</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Transport Info */}
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <h4 className="font-bold text-slate-900 mb-2">ℹ️ Transport Information</h4>
+              <ul className="text-sm text-slate-700 space-y-1">
+                <li>✓ Free shuttle service for all registered students</li>
+                <li>✓ Show your student ID at the shuttle point</li>
+                <li>✓ Capacity: 50 passengers per shuttle</li>
+                <li>✓ Wait times: 5-10 minutes during peak hours</li>
+                <li>✓ Report lost items to transport office (Admin Block 2nd Floor)</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {studentServicesSubTab === 'digital-id' && (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-r from-pink-50 to-pink-100 p-4 rounded-lg border border-pink-300">
+              <h3 className="font-bold text-slate-900 mb-1">🆔 Virtual Campus ID</h3>
+              <p className="text-sm text-slate-700">Digital QR code for gate access & campus facilities</p>
+            </div>
+
+            {/* Virtual ID Card */}
+            <div className="flex justify-center py-4">
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 rounded-lg shadow-2xl max-w-sm w-full border-4 border-yellow-500">
+                {/* ID Card Header */}
+                <div className="text-white mb-4 border-b border-slate-700 pb-3">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider">Seku University</p>
+                  <h3 className="text-xl font-bold">Campus ID Card</h3>
+                </div>
+
+                {/* Student Info */}
+                <div className="text-white mb-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-400">Name:</span>
+                    <span className="font-semibold">{studentData.name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-400">Reg No:</span>
+                    <span className="font-semibold font-mono">{studentData.regNo}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-400">Room:</span>
+                    <span className="font-semibold">{studentData.room}</span>
+                  </div>
+                </div>
+
+                {/* QR Code Mock */}
+                <div className="bg-white p-3 rounded-lg mb-4 flex items-center justify-center">
+                  <svg className="w-32 h-32" viewBox="0 0 200 200" fill="currentColor">
+                    {/* Simple QR pattern */}
+                    <rect width="200" height="200" fill="white"/>
+                    <rect x="10" y="10" width="50" height="50" fill="black"/>
+                    <rect x="20" y="20" width="30" height="30" fill="white"/>
+                    <rect x="25" y="25" width="20" height="20" fill="black"/>
+                    <rect x="140" y="10" width="50" height="50" fill="black"/>
+                    <rect x="150" y="20" width="30" height="30" fill="white"/>
+                    <rect x="155" y="25" width="20" height="20" fill="black"/>
+                    <rect x="10" y="140" width="50" height="50" fill="black"/>
+                    <rect x="20" y="150" width="30" height="30" fill="white"/>
+                    <rect x="25" y="155" width="20" height="20" fill="black"/>
+                    {/* Center pattern */}
+                    <circle cx="100" cy="100" r="30" fill="black"/>
+                    <circle cx="100" cy="100" r="20" fill="white"/>
+                    <circle cx="100" cy="100" r="10" fill="black"/>
+                  </svg>
+                </div>
+
+                {/* Valid Info */}
+                <div className="text-white text-center text-xs border-t border-slate-700 pt-3">
+                  <p className="text-slate-400">Valid for gate access & facilities</p>
+                  <p className="text-yellow-500 font-bold mt-1">Expires: Dec 2026</p>
+                </div>
+              </div>
+            </div>
+
+            {/* ID Features */}
+            <div className="p-4 bg-slate-100 rounded-lg">
+              <h4 className="font-bold text-slate-900 mb-3">✨ Features</h4>
+              <ul className="text-sm text-slate-700 space-y-2">
+                <li>✓ Show QR at main gate for entry</li>
+                <li>✓ Access hostel facilities 24/7</li>
+                <li>✓ Use at library check-in</li>
+                <li>✓ Required for exam attendance</li>
+                <li>✓ Valid year-round while enrolled</li>
+                <li>✓ Screenshot & save for offline use</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ============= RENDER: GRADUATION AUDIT TAB =============
+  const renderGraduationAuditTab = () => (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 border-b border-purple-200">
+        <h2 className="text-xl font-bold text-slate-900">✅ Graduation Audit Checklist</h2>
+        <p className="text-sm text-slate-700 mt-1">Complete all items before graduation application</p>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="p-4 bg-white border-b border-slate-200">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-sm font-semibold text-slate-900">Progress</span>
+          <span className="text-sm font-bold text-purple-600">{getGraduationProgress()}%</span>
+        </div>
+        <div className="w-full bg-slate-200 rounded-full h-3">
+          <div
+            className="h-3 rounded-full bg-gradient-to-r from-purple-500 to-purple-600 transition-all"
+            style={{ width: `${getGraduationProgress()}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Checklist Items */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {graduationChecklist.map(item => (
+          <div
+            key={item.id}
+            onClick={() => toggleChecklistItem(item.id)}
+            className={`p-4 rounded-lg border-2 cursor-pointer transition transform hover:scale-105 ${
+              item.completed
+                ? 'bg-green-50 border-green-500'
+                : 'bg-slate-50 border-slate-300 hover:border-purple-300'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                  item.completed
+                    ? 'bg-green-500 border-green-500'
+                    : 'border-slate-400 group-hover:border-purple-500'
+                }`}
+              >
+                {item.completed && <CheckIcon />}
+              </div>
+              <div className="flex-1">
+                <p
+                  className={`font-semibold ${
+                    item.completed
+                      ? 'text-green-700 line-through'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {item.item}
+                </p>
+              </div>
+              {item.completed && <span className="text-2xl">✓</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Summary */}
+      <div className="p-4 bg-slate-50 border-t border-slate-200">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-white rounded p-2">
+            <p className="text-2xl font-bold text-green-600">{graduationChecklist.filter(i => i.completed).length}</p>
+            <p className="text-xs text-slate-600">Completed</p>
+          </div>
+          <div className="bg-white rounded p-2">
+            <p className="text-2xl font-bold text-amber-600">{graduationChecklist.filter(i => !i.completed).length}</p>
+            <p className="text-xs text-slate-600">Remaining</p>
+          </div>
+          <div className="bg-white rounded p-2">
+            <p className="text-2xl font-bold text-blue-600">{graduationChecklist.length}</p>
+            <p className="text-xs text-slate-600">Total Items</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ============= RENDER: CAREER BRIDGE TAB =============
+  const renderCareerBridgeTab = () => (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 border-b border-blue-200">
+        <h2 className="text-xl font-bold text-slate-900">💼 Career Bridge & Logbook</h2>
+        <p className="text-sm text-slate-700 mt-1">NITA Attachments, Engineering & Business Logbooks</p>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Logbook Assistant Info */}
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <h3 className="font-bold text-slate-900 mb-2">📝 AI Logbook Assistant</h3>
+          <p className="text-sm text-slate-700 mb-3">Get professional writing assistance for your attachment logbooks</p>
+          <p className="text-xs text-slate-600 italic">Supports: NITA Attachments, Engineering Projects, Business Internships</p>
+        </div>
+
+        {/* Logbook Entry Input */}
+        <div className="space-y-2">
+          <label className="block text-sm font-semibold text-slate-900">Your Logbook Entry</label>
+          <textarea
+            value={logbookEntry}
+            onChange={(e) => setLogbookEntry(e.target.value)}
+            placeholder="Date: [Date]&#10;Tasks: [What did you do?]&#10;Skills: [What did you learn?]&#10;Challenges: [What was difficult?]"
+            className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm font-mono"
+            rows="6"
+          />
+        </div>
+
+        {/* Submit Button */}
+        <button
+          onClick={handleLogbookAssist}
+          className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-3 rounded-lg font-bold transition transform hover:scale-105"
+        >
+          ✨ Get AI Writing Assistance
+        </button>
+
+        {/* AI Response */}
+        {logbookAIResponse && (
+          <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-300 rounded-lg space-y-4">
+            <div>
+              <p className="text-sm font-bold text-green-900 mb-2">📝 Your Entry:</p>
+              <div className="bg-white p-3 rounded border-l-4 border-green-500 text-sm text-slate-700">
+                {logbookAIResponse.originalEntry}
+              </div>
+            </div>
+            <div className="bg-white p-3 rounded border-l-4 border-blue-500">
+              <p className="text-sm font-bold text-blue-900 mb-2">✨ Professional Version:</p>
+              <p className="text-sm text-slate-700">{logbookAIResponse.improvedVersion}</p>
+            </div>
+            <div className="bg-white p-3 rounded border-l-4 border-amber-500">
+              <p className="text-sm font-bold text-amber-900 mb-2">💡 Feedback & Tips:</p>
+              <p className="text-sm text-slate-700">{logbookAIResponse.feedback}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Career Resources */}
+        <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+          <h4 className="font-bold text-slate-900 mb-3">📚 Career Resources</h4>
+          <ul className="text-sm text-slate-700 space-y-2">
+            <li className="flex gap-2">
+              <span>🎯</span>
+              <span><strong>NITA Competencies:</strong> Technical skills, Soft skills, Professional conduct</span>
+            </li>
+            <li className="flex gap-2">
+              <span>📊</span>
+              <span><strong>Engineering Requirements:</strong> Technical drawings, Project reports, Analysis</span>
+            </li>
+            <li className="flex gap-2">
+              <span>💼</span>
+              <span><strong>Business Logs:</strong> Market analysis, Financial planning, Leadership experience</span>
+            </li>
+            <li className="flex gap-2">
+              <span>✍️</span>
+              <span><strong>Writing Standards:</strong> Professional tone, Clear structure, Evidence-based</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ============= RENDER: ADMIN DASHBOARD =============
+  const renderAdminDashboard = () => (
+    <div className="flex flex-col h-full pb-20 bg-gradient-to-br from-slate-900 to-slate-800">
+      {/* Header */}
+      <div className="bg-slate-950 border-b border-slate-700 p-4 shadow-lg">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-white">🔐 Executive Intelligence Dashboard</h1>
+            <p className="text-xs text-slate-400">Vice-Chancellor Analytics & Insights</p>
+          </div>
+          <button
+            onClick={handleAdminLogout}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold text-sm"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        {/* Hostel Health */}
+        <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 shadow-xl">
+          <h2 className="text-xl font-bold text-white mb-4">🏠 Hostel Facilities Health</h2>
+          <div className="space-y-3">
+            {analyticsData.hostelRepairs.map((hostel, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+                <div className="flex-1">
+                  <p className="font-semibold text-white">{hostel.hostel} Hall</p>
+                  <p className="text-sm text-slate-300">{hostel.tickets} repair tickets</p>
+                </div>
+                <div className="flex gap-4 items-center">
+                  <div className="w-24 bg-slate-600 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full ${hostel.tickets > 10 ? 'bg-red-500' : hostel.tickets > 5 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                      style={{ width: `${Math.min(hostel.tickets * 8, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-bold w-16">{hostel.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 p-3 bg-red-900 rounded-lg border border-red-700">
+            <p className="text-red-100 text-sm">
+              <span className="font-bold">⚠️ CRITICAL:</span> Turkana Hall showing 15 tickets - recommend immediate maintenance audit
+            </p>
+          </div>
+        </div>
+
+        {/* Student Sentiment */}
+        <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 shadow-xl">
+          <h2 className="text-xl font-bold text-white mb-4">💭 Student Wellness Pulse</h2>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-slate-700 rounded-lg p-4 text-center">
+              <p className="text-slate-400 text-sm mb-2">Stress Level</p>
+              <div className="relative w-24 h-24 mx-auto">
+                <svg className="w-24 h-24" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="#334155" strokeWidth="8" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="45"
+                    fill="none"
+                    stroke="#ef4444"
+                    strokeWidth="8"
+                    strokeDasharray={`${analyticsData.studentSentiment.stress * 2.83} 283`}
+                    transform="rotate(-90 50 50)"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-red-500">
+                  {analyticsData.studentSentiment.stress}%
+                </span>
+              </div>
+            </div>
+            <div className="bg-slate-700 rounded-lg p-4 text-center">
+              <p className="text-slate-400 text-sm mb-2">Anxiety Index</p>
+              <div className="relative w-24 h-24 mx-auto">
+                <svg className="w-24 h-24" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="#334155" strokeWidth="8" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="45"
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth="8"
+                    strokeDasharray={`${analyticsData.studentSentiment.anxiety * 2.83} 283`}
+                    transform="rotate(-90 50 50)"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-amber-500">
+                  {analyticsData.studentSentiment.anxiety}%
+                </span>
+              </div>
+            </div>
+            <div className="bg-slate-700 rounded-lg p-4 text-center">
+              <p className="text-slate-400 text-sm mb-2">Happiness Index</p>
+              <div className="relative w-24 h-24 mx-auto">
+                <svg className="w-24 h-24" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="#334155" strokeWidth="8" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="45"
+                    fill="none"
+                    stroke="#10b981"
+                    strokeWidth="8"
+                    strokeDasharray={`${analyticsData.studentSentiment.happiness * 2.83} 283`}
+                    transform="rotate(-90 50 50)"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-green-500">
+                  {analyticsData.studentSentiment.happiness}%
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 p-3 bg-blue-900 rounded-lg border border-blue-700">
+            <p className="text-blue-100 text-sm">
+              <span className="font-bold">📊 INSIGHT:</span> Elevated stress during exam periods. Recommend: Extended counseling hours, academic support workshops
+            </p>
+          </div>
+        </div>
+
+        {/* Financial Insights */}
+        <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 shadow-xl">
+          <h2 className="text-xl font-bold text-white mb-4">💰 Financial Questions Pulse</h2>
+          <div className="space-y-3">
+            {analyticsData.feeQuestions.map((question, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-slate-700 rounded-lg">
+                <div>
+                  <p className="font-semibold text-white">{question.topic}</p>
+                  <p className="text-xs text-slate-400">{question.count} inquiries this month</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-32 bg-slate-600 rounded-full h-3">
+                    <div
+                      className="h-3 rounded-full bg-blue-500"
+                      style={{ width: `${(question.count / analyticsData.feeQuestions[0].count) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-white font-bold w-8">{question.count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 p-3 bg-yellow-900 rounded-lg border border-yellow-700">
+            <p className="text-yellow-100 text-sm">
+              <span className="font-bold">💡 RECOMMENDATION:</span> Implement automated fee payment reminders and flexible installment plans
+            </p>
+          </div>
+        </div>
+
+        {/* Report Generator */}
+        <button
+          onClick={generateSenateBrief}
+          className="w-full py-4 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-bold text-lg shadow-lg transition transform hover:scale-105"
+        >
+          📄 Generate Weekly Brief for Senate
+        </button>
+      </div>
+    </div>
+  );
+
+  // ============= RENDER: ADMIN AUTH MODAL =============
+  const renderAdminAuth = () => (
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 shadow-2xl max-w-sm w-full mx-4">
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">🔐 Admin Access</h2>
+        <p className="text-sm text-slate-600 mb-4">Enter the administrator password</p>
+        <div className="space-y-3">
+          <input
+            type="password"
+            value={adminPassword}
+            onChange={(e) => setAdminPassword(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
+            placeholder="Enter password"
+            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            autoFocus
+          />
+          {adminPasswordError && (
+            <p className="text-sm text-red-600 font-semibold">{adminPasswordError}</p>
+          )}
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={() => {
+              setShowAdminAuth(false);
+              setAdminPassword('');
+              setAdminPasswordError('');
+            }}
+            className="flex-1 px-4 py-2 bg-slate-200 text-slate-900 rounded-lg hover:bg-slate-300 font-semibold"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleAdminLogin}
+            className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-semibold"
+          >
+            Login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+  const renderLibraryTab = () => (
+    <div className="flex flex-col h-full">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {libraryMessages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-xs p-3 rounded-lg ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-900'}`}>
+              {msg.type === 'library' ? (
+                <div className="space-y-3">
+                  <h3 className="font-bold">{msg.book}</h3>
+                  {msg.targetedPillars && (
+                    <div className="bg-blue-50 p-3 rounded border-l-2 border-blue-500">
+                      <p className="text-xs font-bold text-blue-900 mb-2">📌 3-PILLAR SUMMARY:</p>
+                      {msg.targetedPillars.map((pillar, idx) => (
+                        <div key={idx} className="text-xs text-slate-700 mb-1">
+                          <span className="font-bold text-blue-800">{pillar.pillar}:</span> {pillar.focus}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {msg.sections.map((sec, j) => (
+                    <div key={j}>
+                      <p className="font-semibold text-sm">{sec.title}</p>
+                      {sec.content && <p className="text-sm">{sec.content}</p>}
+                      {sec.items && <ul className="text-sm list-disc ml-4">{sec.items.map((item, k) => <li key={k}>{item}</li>)}</ul>}
+                    </div>
+                  ))}
+                  {msg.role === 'assistant' && (
+                    <button
+                      onClick={() => speakMessage(msg.book + '. ' + msg.sections.map(s => s.title + ': ' + (s.content || '')).join('. '))}
+                      className="mt-2 bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700"
+                      disabled={isSpeaking}
+                    >
+                      {isSpeaking ? '🔊 Speaking...' : '🔊 Listen'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <p>{msg.text}</p>
+                  {msg.role === 'assistant' && (
+                    <button
+                      onClick={() => speakMessage(msg.text)}
+                      className="mt-2 bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700"
+                      disabled={isSpeaking}
+                    >
+                      {isSpeaking ? '🔊 Speaking...' : '🔊 Listen'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Input */}
+      <div className="p-4 border-t border-slate-200 bg-white flex gap-2 items-center">
+        {voiceSupported && (
+          <button
+            onClick={isListening ? stopVoiceListening : startVoiceListening}
+            className={`p-2 rounded-lg transition-all ${isListening ? 'bg-red-500 animate-pulse' : 'bg-slate-200'} hover:opacity-80`}
+            title={isListening ? 'Stop listening...' : 'Click to start speaking'}
+          >
+            {isListening ? '🛑' : '🎤'}
+          </button>
+        )}
+        <input
+          type="text"
+          value={libraryInput}
+          onChange={(e) => setLibraryInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleLibrarySend()}
+          placeholder={isListening ? 'Listening... speak now' : 'Ask about a topic...'}
+          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button onClick={handleLibrarySend} className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600">
+          <SendIcon />
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderWelfareTab = () => (
+    <div className="flex flex-col h-full">
+      {/* Sub-tabs */}
+      <div className="flex gap-2 p-2 bg-slate-100 border-b border-slate-200 overflow-x-auto">
+        {[
+          { id: 'counseling', label: '💚 Counseling' },
+          { id: 'medical', label: '⚕️ Medical' },
+          { id: 'hostels', label: '🏠 Hostels' },
+          { id: 'career', label: '💼 Career' },
+          { id: 'campus', label: '🗺️ Campus' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setWelfareSubTab(tab.id)}
+            className={`px-3 py-2 rounded text-sm font-semibold whitespace-nowrap ${welfareSubTab === tab.id ? 'bg-blue-500 text-white' : 'bg-white text-slate-700'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {welfareSubTab === 'counseling' && (
+          <div className="space-y-4">
+            {/* SEKU Contacts */}
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <h3 className="font-bold text-slate-900 mb-3">🤝 SEKU Counseling Contacts</h3>
+              <div className="space-y-3">
+                <div className="p-3 bg-white rounded border-l-4 border-blue-500">
+                  <p className="font-semibold text-slate-900">{SEKU_DATA.welfare.dean.name}</p>
+                  <p className="text-xs text-slate-600">{SEKU_DATA.welfare.dean.title}</p>
+                  <p className="text-xs text-slate-600">📍 {SEKU_DATA.welfare.dean.office}</p>
+                  <p className="text-sm text-blue-600 font-semibold mt-1">📞 {SEKU_DATA.welfare.dean.phone}</p>
+                </div>
+                <div className="p-3 bg-white rounded border-l-4 border-green-500">
+                  <p className="font-semibold text-slate-900">{SEKU_DATA.welfare.counselor.name}</p>
+                  <p className="text-xs text-slate-600">{SEKU_DATA.welfare.counselor.title}</p>
+                  <p className="text-xs text-slate-600">📍 {SEKU_DATA.welfare.counselor.office}</p>
+                  <p className="text-sm text-green-600 font-semibold mt-1">📞 {SEKU_DATA.welfare.counselor.phone}</p>
+                </div>
+              </div>
+            </div>
+
+            {showCrisisAlert && (
+              <div className="p-4 bg-red-100 border-l-4 border-red-500 rounded">
+                <p className="text-red-800 font-bold">🚨 Crisis Protocol Activated</p>
+                <p className="text-red-700 text-sm">If you're in immediate danger, call emergency services or visit the health center immediately.</p>
+                <p className="text-red-700 text-sm mt-2">Contact: {SEKU_DATA.welfare.counselor.phone}</p>
+              </div>
+            )}
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {counselingMessages.map((msg, i) => (
+                <div key={i} className={`p-3 rounded ${msg.role === 'user' ? 'bg-blue-100 text-slate-900' : 'bg-slate-200'}`}>
+                  {msg.text}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {welfareSubTab === 'medical' && (
+          <div className="space-y-4">
+            <textarea
+              value={medicalSymptoms}
+              onChange={(e) => setMedicalSymptoms(e.target.value)}
+              placeholder="Describe your symptoms..."
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              rows="4"
+            />
+            <button onClick={handleSmartTriage} className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 font-semibold">
+              Get Triage Recommendation
+            </button>
+            {triageResult && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded">
+                <p className="font-semibold text-slate-900">Recommendation:</p>
+                <p className="text-slate-700 mt-2">{triageResult.recommendation}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {welfareSubTab === 'hostels' && (
+          <div className="space-y-4">
+            {/* Hostel Selection - All 6 Hostels */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Select Your Hostel</label>
+              <select
+                value={selectedHostel}
+                onChange={(e) => setSelectedHostel(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                {/* Boys Hostels */}
+                <optgroup label="👨 Boys Hostels">
+                  {SEKU_DATA.hostels.boys.map(hostel => (
+                    <option key={hostel.name} value={hostel.name}>
+                      {hostel.name} ({hostel.rooms})
+                    </option>
+                  ))}
+                </optgroup>
+                {/* Girls Hostels */}
+                <optgroup label="👩 Girls Hostels">
+                  {SEKU_DATA.hostels.girls.map(hostel => (
+                    <option key={hostel.name} value={hostel.name}>
+                      {hostel.name} ({hostel.rooms})
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+
+            {/* Issue Description */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Report an Issue</label>
+              <textarea
+                value={hostelIssue}
+                onChange={(e) => setHostelIssue(e.target.value)}
+                placeholder="Broken window, leaky tap, electrical issue, etc..."
+                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                rows="3"
+              />
+            </div>
+            <button onClick={handleCreateHostelTicket} className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 font-semibold">
+              Report Maintenance Issue
+            </button>
+
+            {hostelTickets.length > 0 && (
+              <div className="mt-6">
+                <h3 className="font-bold text-slate-900 mb-2">📋 Your Tickets:</h3>
+                {hostelTickets.map(ticket => (
+                  <div key={ticket.id} className="p-3 bg-slate-100 rounded-lg mb-2 border-l-4 border-blue-500">
+                    <p className="font-semibold">{ticket.hostel}</p>
+                    <p className="text-sm text-slate-700">{ticket.issue}</p>
+                    <p className="text-xs text-slate-600 mt-1">Status: <span className="font-semibold text-blue-600">{ticket.status}</span></p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {welfareSubTab === 'career' && (
+          <div className="space-y-4">
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <h3 className="font-bold text-slate-900 mb-2">📝 NITA Attachment Logbook</h3>
+              <p className="text-sm text-slate-700">Engineering & Business Students - Draft your daily logbook entries with AI assistance</p>
+            </div>
+            <textarea
+              value={logbookEntry}
+              onChange={(e) => setLogbookEntry(e.target.value)}
+              placeholder="Date: [Date] | Tasks: [What did you do?] | Skills: [What did you learn?] | Challenges: [What was difficult?]"
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              rows="5"
+            />
+            <button onClick={handleLogbookAssist} className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 font-semibold">
+              Get AI Writing Assistance
+            </button>
+            {logbookAIResponse && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">📝 Your Entry:</p>
+                  <p className="text-sm text-slate-600 mt-1">{logbookAIResponse.originalEntry}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">✨ Improved Version:</p>
+                  <p className="text-sm text-slate-600 mt-1">{logbookAIResponse.improvedVersion}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">💡 Feedback:</p>
+                  <p className="text-sm text-slate-600 mt-1">{logbookAIResponse.feedback}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {welfareSubTab === 'campus' && (
+          <div className="space-y-4">
+            <h3 className="font-bold text-slate-900 text-lg">🗺️ SEKU Campus Guide</h3>
+            
+            {/* Tuition Block 1 */}
+            <div>
+              <h4 className="font-semibold text-slate-900 mb-2 text-blue-600">📍 {SEKU_DATA.campus.tuitionBlock1.name}</h4>
+              {SEKU_DATA.campus.tuitionBlock1.buildings.map((building, i) => (
+                <div key={i} className="p-3 bg-blue-50 rounded-lg mb-2 border-l-4 border-blue-500">
+                  <p className="font-semibold text-slate-900">{building.name}</p>
+                  <p className="text-sm text-slate-700">Room: {building.room}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Tuition Block 2 */}
+            <div>
+              <h4 className="font-semibold text-slate-900 mb-2 text-purple-600">📍 {SEKU_DATA.campus.tuitionBlock2.name}</h4>
+              {SEKU_DATA.campus.tuitionBlock2.buildings.map((building, i) => (
+                <div key={i} className="p-3 bg-purple-50 rounded-lg mb-2 border-l-4 border-purple-500">
+                  <p className="font-semibold text-slate-900">{building.name}</p>
+                  <p className="text-sm text-slate-700">Room: {building.room}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input for Counseling */}
+      {welfareSubTab === 'counseling' && (
+        <div className="p-4 border-t border-slate-200 bg-white flex gap-2">
+          <input
+            type="text"
+            value={counselingInput}
+            onChange={(e) => setCounselingInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleCounselingSend()}
+            placeholder="Share your thoughts..."
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+          <button onClick={handleCounselingSend} className="bg-blue-500 text-white p-2 rounded-lg hover:bg-blue-600">
+            <SendIcon />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // ============= MAIN RETURN =============
+  return (
+    <div className="flex flex-col h-screen bg-gradient-to-b from-slate-50 to-slate-100 font-sans">
+      <SplashScreen isVisible={showSplash} onFinish={() => setShowSplash(false)} />
+
+      {/* Admin Auth Modal */}
+      {showAdminAuth && renderAdminAuth()}
+
+      {/* Admin Dashboard */}
+      {isAdminAuthenticated ? (
+        renderAdminDashboard()
+      ) : (
+        <>
+          {/* Header with Hidden Logo Click Counter */}
+          <header
+            onClick={handleLogoClick}
+            className="bg-white border-b border-slate-200 p-4 shadow-sm cursor-pointer hover:bg-slate-50 transition"
+          >
+            <h1 className="text-xl font-bold text-slate-900">🎓 ElimuLink</h1>
+            <p 
+              className="text-xs text-slate-600 transition-opacity duration-500"
+              style={{ opacity: welcomeFade }}
+            >
+              {welcomeMessages[welcomeMessageIndex]}
+            </p>
+          </header>
+
+          {/* Content */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'library' && renderLibraryTab()}
+            {activeTab === 'welfare' && renderWelfareTab()}
+            {activeTab === 'services' && renderStudentServicesTab()}
+            {activeTab === 'graduation' && renderGraduationAuditTab()}
+            {activeTab === 'career' && renderCareerBridgeTab()}
+          </div>
+
+          {/* HIDDEN NAVIGATION - Zero-Click Stealth UI */}
+          {/* Bottom Navigation is hidden - Smart routing handles everything */}
+        </>
+      )}
+    </div>
+  );
+};
+
+export default App;

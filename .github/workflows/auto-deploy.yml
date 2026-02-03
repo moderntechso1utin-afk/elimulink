@@ -1,0 +1,53 @@
+name: Auto Deploy
+
+on:
+  push:
+    branches: [ main, deploy-ready ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
+
+  deploy-frontend:
+    name: Deploy Frontend (Vercel)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # Use Vercel CLI to deploy the built `dist/` folder
+          vercel --prod --token "$VERCEL_TOKEN" --confirm --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID"
+
+  deploy-backend:
+    name: Trigger Backend Deploy (Render)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy via API
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          echo "Triggering Render deploy for service $RENDER_SERVICE_ID"
+          curl -s -X POST "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+          | jq || true
