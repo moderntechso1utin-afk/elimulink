@@ -44,17 +44,36 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: 'Invalid token' });
 }
 
-app.post('/api/admin/auth', (req, res) => {
+const bcrypt = require("bcryptjs");
+
+app.post("/api/admin/auth", (req, res) => {
   const { passcode } = req.body || {};
-  if (!passcode) return res.status(400).json({ error: 'passcode required' });
-  if (!ADMIN_HASH) return res.status(500).json({ error: 'Server not configured for admin auth' });
-  const h = hashPasscode(passcode);
-  if (h === ADMIN_HASH) {
-    const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '12h' });
-    return res.json({ token });
+  if (!passcode) {
+    return res.status(400).json({ error: "passcode required" });
   }
-  return res.status(401).json({ error: 'Invalid passcode' });
+
+  if (!process.env.ADMIN_PASSCODE_HASH) {
+    return res.status(500).json({ error: "Server not configured for admin auth" });
+  }
+
+  const isValid = bcrypt.compareSync(
+    passcode,
+    process.env.ADMIN_PASSCODE_HASH
+  );
+
+  if (!isValid) {
+    return res.status(401).json({ error: "Invalid passcode" });
+  }
+
+  const token = jwt.sign(
+    { admin: true },
+    process.env.ADMIN_JWT_SECRET,
+    { expiresIn: "12h" }
+  );
+
+  return res.json({ token });
 });
+
 
 app.post('/api/libraries/sync', requireAdmin, async (req, res) => {
   const { url } = req.body || {};
