@@ -74,6 +74,18 @@ function encodeWAV(samples, sampleRate) {
   return buffer;
 }
 
+// Greeting helper used on Home
+// (moved into component to use user settings)
+
+// Suggest chips for AI replies
+function suggestChips(text) {
+  const t = (text || "").toLowerCase();
+  if (t.includes("kampala")) return ["President", "Currency", "Best hotels", "Safety tips", "Distance from Nairobi"];
+  if (t.includes("hostel")) return ["Rules", "Fees", "Check-in times", "Contacts", "Report an issue"];
+  if (t.includes("library")) return ["Search books", "Borrowing rules", "Opening hours", "Recommend books"];
+  return ["Explain deeper", "Give examples", "Summarize", "Quiz me", "Show sources"];
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -103,9 +115,21 @@ export default function App() {
   });
   const [savedImages, setSavedImages] = useState([]);
   const [showMyStuff, setShowMyStuff] = useState(false);
+  const [uploads, setUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
+  const [userRole, setUserRole] = useState('student');
+
+  // Time-aware greeting helper (keeps inside component scope)
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    // 5–11: morning, 12–16: afternoon, 17–4: evening
+    if (hour >= 5 && hour <= 11) return "Good morning";
+    if (hour >= 12 && hour <= 16) return "Good afternoon";
+    if (hour >= 17 || hour <= 4) return "Good evening";
+    return "Hello";
+  };
 
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -149,6 +173,10 @@ export default function App() {
         if (snap.exists()) {
           const data = snap.data();
           if (data.region) setRegion(data.region);
+          // Determine role: prefer explicit `role`, else `isStaff` boolean
+          if (data.role) setUserRole(data.role);
+          else if (data.isStaff) setUserRole('staff');
+          else setUserRole('student');
         }
       } catch (e) { console.error('Error reading user prefs', e); }
     })();
@@ -338,12 +366,17 @@ export default function App() {
   const handleFileUpload = () => fileInputRef.current?.click();
 
   const onFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const msg = { id: Date.now(), role: 'user', text: `Uploaded file: ${file.name}`, isFile: true };
-      setMessages(prev => [...prev, msg]);
-      // In a real app, you'd upload to storage and send URI to AI
-    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploads(prev => [...prev, { name: file.name, size: file.size, type: file.type }]);
+
+    // show a lightweight chat message about the upload
+    const msg = { id: Date.now(), role: 'user', text: `📎 Uploaded: ${file.name}`, isFile: true };
+    setMessages(prev => [...prev, msg]);
+
+    // clear input so same file can be re-uploaded if needed
+    e.target.value = '';
   };
 
   const startEdit = (msg) => {
@@ -351,11 +384,59 @@ export default function App() {
     setEditValue(msg.text || msg.content);
   };
 
-  const saveEdit = (id) => {
-    setMessages(prev => prev.map(m => m.id === id ? { ...m, text: editValue } : m));
+  const saveEdit = async (id) => {
+    const editedText = editValue.trim();
+    if (!editedText) return;
+
+    // 1) Update the edited user message in-place
+    const idx = messages.findIndex(m => m.id === id);
+    if (idx === -1) return;
+
+    // 2) Build a new messages array:
+    // - replace user text
+    // - remove the immediate next AI response (if any), so we regenerate it
+    const nextMsg = messages[idx + 1];
+    const shouldRemoveNextAI = nextMsg && nextMsg.role === 'ai';
+
+    const updated = messages
+      .map(m => (m.id === id ? { ...m, text: editedText } : m))
+      .filter((m, i) => !(shouldRemoveNextAI && i === idx + 1));
+
+    setMessages(updated);
     setEditingId(null);
-    // Trigger AI again for the new text
-    handleSubmit(null, editValue);
+
+    // 3) Regenerate AI response once
+    setIsThinking(true);
+    try {
+      const idToken = user ? await user.getIdToken() : null;
+
+      const res = await fetch(apiUrl('/api/ai/student'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+        },
+        body: JSON.stringify({
+          text: editedText,
+          region,
+          userName: settings.userName,
+          aiTone: settings.aiTone,
+          useGoogleSearch: settings.useGoogleSearch
+        })
+      });
+
+      const data = await res.json();
+      const aiText = data?.text || 'Connection error.';
+
+      // Insert AI reply right after the edited message
+      const rebuilt = [...updated];
+      rebuilt.splice(idx + 1, 0, { id: Date.now() + 1, role: 'ai', content: aiText });
+      setMessages(rebuilt);
+    } catch (err) {
+      setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: ' + err.message }]);
+    } finally {
+      setIsThinking(false);
+    }
   };
 
   const handleSubmit = async (e, customText = null) => {
@@ -371,41 +452,69 @@ export default function App() {
     setIsThinking(true);
 
     try {
+      const filesSummary = uploads.length
+        ? `User uploaded files: ${uploads.map(u => u.name).join(', ')}. Use them if relevant.`
+        : '';
+
+      const rulePrefix = `RULE: Always answer on the home chat. Do not tell user to navigate to modules. Use institution info when relevant; otherwise use global info. QUESTION:`;
+
       const isImageReq = /(generate|create|show|draw|make).*(image|picture|photo|illustration|flag|draw)/i.test(text);
       if (isImageReq) {
         try {
-          // Prefer server-side generation if admin token present
+          const examStyle = "Make it clean, high-contrast, exam-ready, well-labeled if diagram, minimal clutter.";
+          const imgPrompt = `${text}\n\n${examStyle}`;
+
           let imgDataUrl = null;
           if (adminToken) {
-            try { imgDataUrl = await serverGenerateImage(text); } catch(e) { imgDataUrl = null; }
+            try { imgDataUrl = await serverGenerateImage(imgPrompt); } catch(e) { imgDataUrl = null; }
           }
-          if (!imgDataUrl) imgDataUrl = await imageAPI.generateImage(text);
+          if (!imgDataUrl) imgDataUrl = await imageAPI.generateImage(imgPrompt);
           setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', type: 'image', content: imgDataUrl, text: 'Here is the generated image.' }]);
         } catch (imgErr) {
-          // fallback to text description via Gemini
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: `Current Time: ${new Date().toLocaleString()}. Region: ${region}. User: ${settings.userName}. User Question: ${text}` }] }],
-              tools: settings.useGoogleSearch ? [{ google_search: {} }] : [],
-              systemInstruction: { parts: [{ text: `You are ElimuLink Pro with AI Tone: ${settings.aiTone}. Provide an accurate, visually descriptive image description adapted to the Region: ${region}. Keep concise.` }] }
-            })
-          });
-          const data = await res.json();
-          const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Could not generate image.';
-          setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+          // fallback to textual description via backend student AI
+          try {
+            const idToken = user ? await user.getIdToken() : null;
+            const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
+            const res = await fetch(apiUrl('/api/ai/student'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': idToken ? `Bearer ${idToken}` : ''
+              },
+              body: JSON.stringify({
+                text: bodyText,
+                region,
+                userName: settings.userName,
+                aiTone: settings.aiTone,
+                useGoogleSearch: settings.useGoogleSearch
+              })
+            });
+            const data = await res.json();
+            const aiText = data?.text || 'Could not generate image.';
+            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+          } catch (fallbackErr) {
+            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: Could not reach AI service.' }]);
+          }
         }
       } else {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        const idToken = user ? await user.getIdToken() : null;
+        const bodyText = `${filesSummary}\n\n${rulePrefix} ${text}`;
+        const res = await fetch(apiUrl('/api/ai/student'), {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': idToken ? `Bearer ${idToken}` : ''
+          },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: `Current Time: ${new Date().toLocaleString()}. Region: ${region}. User: ${settings.userName}. User Question: ${text}` }] }],
-            tools: settings.useGoogleSearch ? [{ google_search: {} }] : [],
-            systemInstruction: { parts: [{ text: `You are ElimuLink Pro with AI Tone: ${settings.aiTone}. Provide accurate, globally relevant information and adapt responses to the provided Region: ${region}. If Region is 'Global', respond in a neutral, worldwide context. Keep answers concise and actionable. End with 2-3 clear suggestions for 'knowing more'.` }] }
+            text: bodyText,
+            region,
+            userName: settings.userName,
+            aiTone: settings.aiTone,
+            useGoogleSearch: settings.useGoogleSearch
           })
         });
         const data = await res.json();
-        const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Connection error.';
+        const aiText = data?.text || 'Connection error.';
         setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
       }
     } catch (err) {
@@ -439,8 +548,9 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
           <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
-          <SidebarItem icon={Gem} label="Gems" onClick={() => {}} />
-          <SidebarItem icon={FolderHeart} label="Admin" onClick={() => { setShowAdmin(s=>!s); }} />
+          {userRole === 'staff' && (
+            <SidebarItem icon={FolderHeart} label="Admin" onClick={() => { setShowAdmin(s=>!s); }} />
+          )}
           
           <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
           {chatHistory.slice(0, 5).map(chat => (
@@ -502,8 +612,9 @@ export default function App() {
                   <Gem size={40} className="text-sky-400" />
                 </div>
                 <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">
-                  Global Intelligence Hub
+                  {getGreeting()}, {settings.userName}
                 </h1>
+                <div className="text-slate-400 text-sm mt-2">{currentTime}</div>
                 <p className="text-slate-400 text-sm max-w-md mx-auto">
                   Ask me about geography, technical research, books, or generate high-quality images. Choose a region above to tailor responses.
                 </p>
@@ -622,7 +733,20 @@ export default function App() {
                         </div>
                       )}
                       <p className="text-sm leading-relaxed whitespace-pre-wrap">{m.text || m.content}</p>
-                      
+                      {m.role === 'ai' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {suggestChips(m.text || m.content).slice(0,5).map((c) => (
+                            <button
+                              key={c}
+                              onClick={() => handleSubmit(null, c)}
+                              className="text-[10px] px-3 py-1 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300"
+                            >
+                              {c}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Action Bar */}
                       <div className={`mt-3 pt-3 border-t border-white/5 flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity`}>
                         {m.role === 'user' ? (
@@ -631,7 +755,7 @@ export default function App() {
                           </button>
                         ) : (
                           <>
-                            <button onClick={() => handleTTS(m.content)} className="text-[10px] flex items-center gap-1 hover:text-sky-400 uppercase font-bold">
+                            <button onClick={() => handleTTS(m.text || m.content)} className="text-[10px] flex items-center gap-1 hover:text-sky-400 uppercase font-bold">
                               <Volume2 size={10} /> Hear Voice
                             </button>
                             {m.type === 'image' && m.content && (
@@ -663,6 +787,16 @@ export default function App() {
         {/* Input Dock */}
         <div className="p-4 bg-slate-950">
           <div className="max-w-3xl mx-auto">
+            {uploads.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pb-2">
+                {uploads.map((f, i) => (
+                  <div key={i} className="text-[10px] px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300 flex items-center gap-2">
+                    {f.name}
+                    <button onClick={() => setUploads(prev => prev.filter((_, idx) => idx !== i))} className="opacity-70 hover:opacity-100">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl focus-within:border-sky-500/50 transition-all p-2">
               <form onSubmit={handleSubmit} className="flex flex-col">
                 <input 
