@@ -197,6 +197,12 @@ export default function App() {
           // ✅ Keep extra profile info (for student/institution later)
           setUserProfile({
             role: role ?? 'public',
+
+            // ✅ Student scope model
+            studentScope: data.studentScope ?? 'general', // general | institution
+            educationLevel: data.educationLevel ?? null,  // primary | highschool | self | etc
+
+            // Institution-specific (only meaningful if studentScope === 'institution')
             studentType: data.studentType ?? null,
             stage: data.stage ?? null,
             verificationStatus: data.verificationStatus ?? null,
@@ -218,7 +224,11 @@ export default function App() {
             console.warn('Could not create default user doc', e);
           }
 
-          setUserProfile({ role: 'public' });
+          setUserProfile({
+            role: 'public',
+            studentScope: 'general',
+            educationLevel: null,
+          });
         }
       } catch (e) {
         console.error('Error reading user prefs', e);
@@ -575,9 +585,23 @@ export default function App() {
   const setRoleAndPersist = async (role) => {
     try {
       const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
-      await setDoc(uDoc, { role }, { merge: true });
+      await setDoc(
+        uDoc,
+        role === 'student'
+          ? {
+              role: 'student',
+              studentScope: 'general',
+              verificationStatus: 'unverified',
+            }
+          : { role },
+        { merge: true }
+      );
       setUserRole(role);
-      setUserProfile(p => ({ ...(p || {}), role }));
+      setUserProfile(p => ({
+        ...(p || {}),
+        role,
+        ...(role === 'student' && { studentScope: 'general', verificationStatus: 'unverified' }),
+      }));
       setNeedsRolePick(false);
     } catch (e) {
       console.error('Failed to set role', e);
@@ -593,6 +617,15 @@ export default function App() {
       <span>{label}</span>
     </button>
   );
+
+  // Student capability booleans
+  const isStudent = userRole === 'student';
+  const studentScope = userProfile?.studentScope ?? 'general';
+  const isGeneralLearner = isStudent && studentScope === 'general';
+  const isInstitutionStudent = isStudent && studentScope === 'institution';
+  const isInstitutionVerified =
+    isInstitutionStudent &&
+    userProfile?.verificationStatus === 'verified';
 
   // Role-aware sidebar title
   const roleTitle =
@@ -657,6 +690,20 @@ export default function App() {
           <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
           {(userRole === 'staff' || userRole === 'institution') && (
             <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
+          )}
+          
+          {isStudent && (
+            <>
+              <SidebarItem icon={FolderHeart} label="Learn" onClick={() => {}} />
+              <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => {}} />
+            </>
+          )}
+          
+          {isInstitutionVerified && (
+            <>
+              <SidebarItem icon={FolderHeart} label="Library" onClick={() => {}} />
+              <SidebarItem icon={FolderHeart} label="Departments" onClick={() => {}} />
+            </>
           )}
           
           <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
