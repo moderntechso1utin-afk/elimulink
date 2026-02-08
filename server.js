@@ -9,51 +9,36 @@ const app = express();
 app.use(express.json({ limit: '5mb' }));
 
 // Allow your frontend origins (Vercel + localhost)
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
 
-// If no explicit CORS_ORIGINS set, allow common development and Vercel domains
-const DEFAULT_ALLOWED_ORIGINS = [
+// CORS: allow https://*.vercel.app, localhost:3000, localhost:5173
+const allowedOrigins = [
+  /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/, // https://*.vercel.app
   'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:4173',
   'http://localhost:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001',
-  // Vercel production and preview deployments
-  /\.vercel\.app$/,
 ];
 
-const corsOrigins = ALLOWED_ORIGINS.length > 0 ? ALLOWED_ORIGINS : DEFAULT_ALLOWED_ORIGINS;
-
-app.use(cors({
+const corsOptions = {
   origin: function(origin, cb) {
-    // allow non-browser tools (curl, Postman)
-    if (!origin) return cb(null, true);
-    
-    // Check against explicit list or regex patterns
-    const isAllowed = corsOrigins.some(allowed => {
-      if (allowed instanceof RegExp) {
-        return allowed.test(origin);
-      }
+    if (!origin) return cb(null, true); // allow non-browser tools
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (allowed instanceof RegExp) return allowed.test(origin);
       return origin === allowed;
     });
-    
     if (isAllowed) {
       console.log(`[CORS] Allowed: ${origin}`);
       return cb(null, true);
     }
-    
     console.warn(`[CORS] Blocked: ${origin}`);
-    return cb(null, false); // silently reject (browser will handle)
+    return cb(null, false);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400, // 24 hours
-}));
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 const PORT = process.env.PORT || 4000;
 const APP_ID = process.env.VITE_APP_ID || 'elimulink-pro-v2';
