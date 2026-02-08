@@ -1,7 +1,9 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
+
+console.log('VITE_API_BASE:', import.meta.env.VITE_API_BASE); // TEMP: Verify env value
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, collection, onSnapshot, query, serverTimestamp, orderBy, addDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, collection, onSnapshot, query, serverTimestamp, orderBy, addDoc, getDocs, getDoc, deleteDoc, where } from 'firebase/firestore';
 import imageAPI from './services/imageAPI.js';
 import { 
   Plus, 
@@ -23,6 +25,7 @@ import {
   Moon,
   Search
 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from "react";
 
 // --- CONFIG & INIT ---
 // Read Firebase config from environment variables (preferred)
@@ -153,7 +156,18 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
+  // Responsive sidebar state
+  const [isSidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+      if (window.innerWidth >= 768) setSidebarOpen(true);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [activeChatId, setActiveChatId] = useState(null);
@@ -177,6 +191,7 @@ export default function App() {
   });
   const [savedImages, setSavedImages] = useState([]);
   const [showMyStuff, setShowMyStuff] = useState(false);
+  const [showServicesHub, setShowServicesHub] = useState(false);
   const [uploads, setUploads] = useState([]);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -575,6 +590,11 @@ export default function App() {
         ? `User uploaded files: ${uploads.map(u => u.name).join(', ')}. Use them if relevant.`
         : '';
 
+      // Compose department-aware system prompt
+      const basePrompt = `You are ElimuLink, an institutional learning copilot. Tone: ${settings.aiTone || 'professional'}. Be accurate. If unsure, say you are unsure and suggest what to check. Support both global knowledge and institution-specific help. Never reveal secrets or tokens.`;
+      const deptPrompt = `\nDepartment Mode: ${activeDepartment.name}\nInstructions: ${activeDepartment.prompt}`;
+      const systemPrompt = basePrompt + deptPrompt;
+
       const rulePrefix = `RULE: Always answer on the home chat. Do not tell user to navigate to modules. Use institution info when relevant; otherwise use global info. QUESTION:`;
 
       const isImageReq = /(generate|create|show|draw|make).*(image|picture|photo|illustration|flag|draw)/i.test(text);
@@ -605,12 +625,21 @@ export default function App() {
                 region,
                 userName: settings.userName,
                 aiTone: settings.aiTone,
-                useGoogleSearch: settings.useGoogleSearch
+                useGoogleSearch: settings.useGoogleSearch,
+                departmentId: activeDepartmentId,
+                systemPrompt
               })
             });
             const data = await res.json();
+            // AI department switch suggestion
+            if (data?.suggestDepartmentId && data.suggestDepartmentId !== activeDepartmentId) {
+              setSuggestedDept(data);
+              setShowDeptBanner(true);
+            }
             const aiText = data?.text || 'Could not generate image.';
             setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+            // Log activity
+            logInstitutionActivity({ departmentId: activeDepartmentId, studentUid: user?.uid, chatId: activeChatId, role: userRole, content: text });
           } catch (fallbackErr) {
             setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: Could not reach AI service.' }]);
           }
@@ -629,18 +658,48 @@ export default function App() {
             region,
             userName: settings.userName,
             aiTone: settings.aiTone,
-            useGoogleSearch: settings.useGoogleSearch
+            useGoogleSearch: settings.useGoogleSearch,
+            departmentId: activeDepartmentId,
+            systemPrompt
           })
         });
         const data = await res.json();
+        // AI department switch suggestion
+        if (data?.suggestDepartmentId && data.suggestDepartmentId !== activeDepartmentId) {
+          setSuggestedDept(data);
+          setShowDeptBanner(true);
+        }
         const aiText = data?.text || 'Connection error.';
         setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: aiText }]);
+        // Log activity
+        logInstitutionActivity({ departmentId: activeDepartmentId, studentUid: user?.uid, chatId: activeChatId, role: userRole, content: text });
       }
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'Error: ' + err.message }]);
     } finally {
       setIsThinking(false);
     }
+  };
+
+  // Log activity to institution-scoped Firestore collection
+  const logInstitutionActivity = async ({ departmentId, studentUid, chatId, role, content }) => {
+    try {
+      const institutionId = userProfile?.institutionId;
+      if (!departmentId || !studentUid || !chatId || !institutionId) return;
+      const col = collection(db, 'institutions', institutionId, 'activity');
+      await addDoc(col, {
+        departmentId,
+        studentUid,
+        chatId,
+        role,
+        content,
+        createdAt: serverTimestamp()
+      });
+      // Log to console for verification
+      const instDoc = await getDoc(doc(db, 'institutions', institutionId));
+      const institutionData = instDoc.exists() ? instDoc.data() : null;
+      console.log("🏫 Institution lookup result:", institutionId, institutionData);
+    } catch (e) { /* ignore */ }
   };
 
   // Handler to set and persist role choice
@@ -671,8 +730,11 @@ export default function App() {
   };
 
   const SidebarItem = ({ icon: Icon, label, onClick, active }) => (
-    <button 
-      onClick={onClick}
+    <button
+      onClick={() => {
+        onClick && onClick();
+        if (isMobile) setSidebarOpen(false);
+      }}
       className={`w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors ${active ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-white/5'}`}
     >
       <Icon size={18} />
@@ -720,6 +782,15 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      {/* Hamburger for mobile */}
+      {isMobile && (
+        <button
+          className="fixed top-4 left-4 z-40 p-2 rounded-lg bg-slate-900 border border-white/10 text-sky-400 md:hidden"
+          onClick={() => setSidebarOpen(true)}
+        >
+          <Menu size={28} />
+        </button>
+      )}
       {/* Role Picker Modal (one-time) */}
       {needsRolePick && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -754,8 +825,48 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* Sidebar: Collapsible Menu */}
-      <aside className={`${isSidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-slate-900 border-r border-white/5 flex flex-col shrink-0`}>
+      {/* Institution Onboarding Modal */}
+      {showInstitutionModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-bold mb-4 text-sky-400">Join your Institution</h2>
+            <div className="mb-2">
+              <input type="email" className="w-full p-2 rounded bg-slate-800 border border-white/10 mb-2 text-white" placeholder="Student Email" value={onboardEmail} onChange={e=>setOnboardEmail(e.target.value)} />
+              <input className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white" placeholder="Registration Number" value={onboardRegNo} onChange={e=>setOnboardRegNo(e.target.value)} />
+            </div>
+            {onboardInstitutions.length > 1 && (
+              <div className="mb-2">
+                <label className="text-xs text-slate-300">Select Institution</label>
+                <select className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white mt-1" value={onboardSelectedInst||''} onChange={e=>setOnboardSelectedInst(e.target.value)}>
+                  <option value="">-- Select --</option>
+                  {onboardInstitutions.map(inst => (
+                    <option key={inst.id} value={inst.id}>{inst.name || inst.id}</option>
+                  ))}
+                </select>
+                <button className="mt-2 w-full bg-sky-500 text-white font-bold py-2 rounded" onClick={handleSelectInstitution}>Confirm</button>
+              </div>
+            )}
+            {onboardError && <div className="text-red-400 text-xs mb-2">{onboardError}</div>}
+            <button className="w-full bg-sky-500 text-white font-bold py-2 rounded mt-2" onClick={handleInstitutionOnboard}>Continue</button>
+          </div>
+        </div>
+      )}
+      {/* Sidebar: Drawer on mobile, static on desktop */}
+      {/* Backdrop for mobile drawer */}
+      {isMobile && isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <aside
+        className={
+          isMobile
+            ? `fixed top-0 left-0 z-40 h-full w-64 bg-slate-900 border-r border-white/5 flex flex-col transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+            : `w-64 bg-slate-900 border-r border-white/5 flex flex-col shrink-0`
+        }
+        style={isMobile ? { boxShadow: isSidebarOpen ? '0 0 0 9999px rgba(0,0,0,0.5)' : undefined } : {}}
+      >
         <div className="p-4 border-b border-white/5 flex flex-col gap-2">
           <div className="flex items-center gap-2 font-bold text-sky-400">
             <div className="w-6 h-6 bg-sky-500 rounded flex items-center justify-center text-white text-[10px]">EL</div>
@@ -772,24 +883,22 @@ export default function App() {
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
           <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
+          <SidebarItem icon={Gem} label="Services Hub" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
           {(userRole === 'staff' || userRole === 'institution') && (
             <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
           )}
-          
           {isStudent && (
             <>
               <SidebarItem icon={FolderHeart} label="Learn" onClick={() => {}} />
               <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => {}} />
             </>
           )}
-          
           {isInstitutionVerified && (
             <>
               <SidebarItem icon={FolderHeart} label="Library" onClick={() => {}} />
               <SidebarItem icon={FolderHeart} label="Departments" onClick={() => {}} />
             </>
           )}
-          
           <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
           {chatHistory.slice(0, 5).map(chat => (
             <button key={chat.id} onClick={() => { setActiveChatId(chat.id); setMessages(chat.messages || []); }} className="w-full text-left p-2 rounded text-xs truncate text-slate-400 hover:bg-white/5">
@@ -805,7 +914,18 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative">
+      <main className={`flex-1 flex flex-col relative ${isMobile ? '' : 'ml-0'}`}>
+        {/* Department label and switch banner */}
+        <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+          <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">Department: {activeDepartment.name}</span>
+        </div>
+        {suggestedDept && showDeptBanner && (
+          <div className="mx-4 mb-2 p-2 bg-emerald-900/80 border border-emerald-400 rounded flex items-center gap-3 text-xs text-white">
+            <span>Switch to {departments.find(d=>d.id===suggestedDept.suggestDepartmentId)?.name || suggestedDept.suggestDepartmentId}? <span className="text-slate-300">({suggestedDept.reason})</span></span>
+            <button className="ml-2 px-2 py-1 bg-emerald-500 rounded text-white font-bold" onClick={() => { setActiveDepartmentId(suggestedDept.suggestDepartmentId); setShowDeptBanner(false); setSuggestedDept(null); }}>Switch</button>
+            <button className="ml-1 px-2 py-1 bg-slate-700 rounded text-white" onClick={() => setShowDeptBanner(false)}>Dismiss</button>
+          </div>
+        )}
         <header className="h-14 border-b border-white/5 flex items-center px-4 justify-between bg-slate-950/50 backdrop-blur-md sticky top-0 z-10">
           <div className="flex items-center gap-4">
             <button onClick={() => setSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-white/10 rounded-lg">
@@ -878,9 +998,74 @@ export default function App() {
                   </div>
                 )}
               </div>
+            ) : showServicesHub ? (
+              <div className="p-4 bg-slate-900 rounded-lg max-h-[600px] overflow-y-auto">
+                <h2 className="text-lg font-bold mb-4">Services Hub</h2>
+                {userRole === 'student' && (
+                  <>
+                    <section className="mb-6">
+                      <h3 className="font-semibold text-sky-400 mb-2">Student Services</h3>
+                      <ul className="list-disc pl-6 text-slate-300 text-sm">
+                        <li>Request Transcripts</li>
+                        <li>Ask for Support</li>
+                        <li>Book Counseling</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className="font-semibold text-sky-400 mb-2">Requests</h3>
+                      <ul className="list-disc pl-6 text-slate-300 text-sm">
+                        <li>Submit a Request</li>
+                        <li>View Request Status</li>
+                      </ul>
+                    </section>
+                  </>
+                )}
+                {(userRole === 'staff' || userRole === 'institution') && (
+                  <>
+                    <section className="mb-6">
+                      <h3 className="font-semibold text-emerald-400 mb-2">Institution Services</h3>
+                      <ul className="list-disc pl-6 text-slate-300 text-sm">
+                        <li>Manage Student Requests</li>
+                        <li>Approve Transcripts</li>
+                        <li>Schedule Counseling</li>
+                      </ul>
+                    </section>
+                    <section className="mb-6">
+                      <h3 className="font-semibold text-emerald-400 mb-2">Approvals</h3>
+                      <ul className="list-disc pl-6 text-slate-300 text-sm">
+                        <li>Approve Requests</li>
+                        <li>View Pending Approvals</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <h3 className="font-semibold text-emerald-400 mb-2">Reports</h3>
+                      <ul className="list-disc pl-6 text-slate-300 text-sm">
+                        <li>View Service Reports</li>
+                        <li>Download Reports</li>
+                      </ul>
+                    </section>
+                  </>
+                )}
+                <button className="mt-6 bg-sky-500 px-4 py-2 rounded text-white font-bold" onClick={() => setShowServicesHub(false)}>Close</button>
+              </div>
             ) : showAdmin ? (
               <div className="p-4 bg-slate-900 rounded-lg max-h-[600px] overflow-y-auto">
+                <h2 className="text-lg font-bold mb-4">Institution Services</h2>
+                <div className="mb-6 flex flex-wrap gap-2">
+                  {departments.filter(d=>d.id!=='general').map(dept => (
+                    <button key={dept.id} className={`px-3 py-2 rounded font-bold text-xs ${activeDepartmentId===dept.id?'bg-sky-500 text-white':'bg-slate-800 text-sky-200 hover:bg-sky-700 hover:text-white'}`} onClick={()=>{setActiveDepartmentId(dept.id); setShowAdmin(false);}}>{dept.name}</button>
+                  ))}
+                </div>
                 <h2 className="text-lg font-bold">Admin: Libraries</h2>
+                      {/* Department Admin Dashboard (stub, UI only) */}
+                      {/* Example: /institution/department/:deptId (no routing refactor) */}
+                      {userRole === 'staff' && showAdmin && selectedLibrary && (
+                        <div className="p-4 bg-slate-900 rounded-lg mt-4">
+                          <h2 className="text-lg font-bold mb-2">Department Admin Dashboard (Stub)</h2>
+                          <div className="text-xs text-slate-400 mb-2">Department: {activeDepartment.name}</div>
+                          <div className="text-slate-300">(Logs and cases for this department would be shown here.)</div>
+                        </div>
+                      )}
                 {!adminToken ? (
                   <div className="mt-3 flex gap-2">
                     <input value={adminPasscode} onChange={(e)=>setAdminPasscode(e.target.value)} placeholder="Admin passcode" type="password" className="flex-1 bg-slate-800 border border-white/10 rounded px-2 py-1 text-sm" />
@@ -1023,8 +1208,8 @@ export default function App() {
         </div>
 
         {/* Input Dock */}
-        <div className="p-4 bg-slate-950">
-          <div className="max-w-3xl mx-auto">
+        <div className={`p-4 bg-slate-950 ${isMobile ? 'fixed bottom-0 left-0 w-full z-20' : ''}`} style={isMobile ? {boxShadow:'0 -2px 16px 0 rgba(0,0,0,0.2)'} : {}}>
+          <div className={`${isMobile ? 'max-w-full' : 'max-w-3xl mx-auto'}`}>
             {uploads.length > 0 && (
               <div className="flex flex-wrap gap-2 px-3 pb-2">
                 {uploads.map((f, i) => (
