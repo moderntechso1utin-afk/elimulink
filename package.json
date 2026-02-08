@@ -4,7 +4,7 @@
   "description": "AI-powered student learning assistant with library module",
   "main": "src/index.jsx",
   "scripts": {
-    "start": "vite",
+    "start": "node server.js",
     "dev": "vite",
     "server": "node server.js",
     "build": "vite build",

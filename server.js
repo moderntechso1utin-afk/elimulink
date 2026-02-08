@@ -284,9 +284,12 @@ Question: ${text}
   }
 });
 
+
+// Health check endpoint for Render
+app.get('/health', (req, res) => res.status(200).send('ok'));
+
 app.listen(PORT, () => {
   console.log(`[SERVER] ElimuLink API listening on port ${PORT}`);
-  console.log(`[CONFIG] CORS origins: ${corsOrigins.map(o => o instanceof RegExp ? o.source : o).join(', ')}`);
   console.log(`[CONFIG] Firebase Admin: ${db ? 'initialized' : 'NOT configured'}`);
   console.log(`[CONFIG] Gemini API: ${process.env.GEMINI_API_KEY ? 'set' : 'NOT configured'}`);
   console.log(`[CONFIG] OpenAI API: ${OPENAI_KEY ? 'set' : 'not configured'}`);
