@@ -1,9 +1,7 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
-
-console.log('VITE_API_BASE:', import.meta.env.VITE_API_BASE); // TEMP: Verify env value
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, collection, onSnapshot, query, serverTimestamp, orderBy, addDoc, getDocs, getDoc, deleteDoc, where } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import InstitutionAdminDashboard from "./pages/institution/InstitutionAdminDashboard";
+import AdminDashboard from "./pages/institution/AdminDashboard";
+import { app, db, auth } from './lib/firebase';
 import imageAPI from './services/imageAPI.js';
 import { 
   Plus, 
@@ -23,12 +21,22 @@ import {
   User,
   Sun,
   Moon,
-  Search
+  Search,
+  Lock,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import React, { useState, useEffect, useMemo } from "react";
+import { getDepartments } from './lib/institution';
+import { onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 
 // --- CONFIG & INIT ---
 // Read Firebase config from environment variables (preferred)
+
+// TEMP: Log Firebase env vars for debugging
+console.log('VITE_FIREBASE_API_KEY:', import.meta.env.VITE_FIREBASE_API_KEY);
+console.log('VITE_FIREBASE_AUTH_DOMAIN:', import.meta.env.VITE_FIREBASE_AUTH_DOMAIN);
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -39,9 +47,9 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// const app = initializeApp(firebaseConfig);
+// const auth = getAuth(app);
+// const db = getFirestore(app);
 const appId = import.meta.env.VITE_APP_ID || 'elimulink-pro-v2';
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ''; 
 // API base for backend (set this in Vercel to your Render service URL)
@@ -151,6 +159,14 @@ export default function App() {
     }
   }, []);
 
+  // --- Institution Admin Dashboard Route ---
+  const [path, setPath] = useState(window.location.pathname);
+  useEffect(() => {
+    const handler = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
+
   const [envError, setEnvError] = useState(null);
   const [user, setUser] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -199,6 +215,19 @@ export default function App() {
   const [userRole, setUserRole] = useState('public');
   const [userProfile, setUserProfile] = useState(null);
   const [needsRolePick, setNeedsRolePick] = useState(false);
+  const [showInstitutionModal, setShowInstitutionModal] = useState(false);
+  const [staffCodeInput, setStaffCodeInput] = useState('');
+  const [institutionDepartments, setInstitutionDepartments] = useState([]);
+  const [institutionExpanded, setInstitutionExpanded] = useState(false);
+  const [activeDepartmentId, setActiveDepartmentId] = useState(() => localStorage.getItem('activeDepartmentId') || null);
+  const [activeDepartmentName, setActiveDepartmentName] = useState(() => localStorage.getItem('activeDepartmentName') || '');
+  const [showDeptBanner, setShowDeptBanner] = useState(false);
+  const [suggestedDept, setSuggestedDept] = useState(null);
+  const [onboardEmail, setOnboardEmail] = useState('');
+  const [onboardRegNo, setOnboardRegNo] = useState('');
+  const [onboardInstitutions, setOnboardInstitutions] = useState([]);
+  const [onboardSelectedInst, setOnboardSelectedInst] = useState('');
+  const [onboardError, setOnboardError] = useState('');
 
   // Time-aware greeting helper (keeps inside component scope)
   const getGreeting = () => {
@@ -212,6 +241,59 @@ export default function App() {
 
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
+  const isStaffRole = ["staff", "departmentAdmin", "superAdmin"].includes(userRole);
+  const departments = institutionDepartments;
+  const activeDepartment =
+    departments.find((d) => d.id === activeDepartmentId) ||
+    { id: activeDepartmentId || 'general', name: activeDepartmentName || 'General', prompt: 'General student support.' };
+
+  const handleDepartmentSelect = (dep) => {
+    setActiveDepartmentId(dep.id);
+    setActiveDepartmentName(dep.name || dep.id);
+    localStorage.setItem('activeDepartmentId', dep.id);
+    localStorage.setItem('activeDepartmentName', dep.name || dep.id);
+    if (isMobile) setSidebarOpen(false);
+  };
+
+  async function verifyStaffCode(code) {
+    try {
+      if (!user) return alert('Not signed in');
+      if (!userProfile?.institutionId) return alert('No institutionId on your profile yet');
+      const settingsRef = doc(db, 'institutions', userProfile.institutionId, 'settings', 'security');
+      const snap = await getDoc(settingsRef);
+      if (!snap.exists()) return alert('No staff code set yet in institutions/{institutionId}/settings/security');
+      const staffCode = snap.data().staffCode;
+      if (!staffCode) return alert('security.staffCode missing');
+      if (code === staffCode) {
+        const uDoc = doc(db, 'artifacts', appId, 'users', user.uid);
+        await setDoc(uDoc, { role: 'staff', staffCodeVerified: true }, { merge: true });
+        setUserRole('staff');
+        setShowInstitutionModal(false);
+        setStaffCodeInput('');
+        alert('Staff code verified!');
+      } else {
+        alert('Invalid staff code');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Verification error: ' + (e.message || 'unknown'));
+    }
+  }
+
+  const handleSelectInstitution = () => {
+    if (!onboardSelectedInst) return;
+    setOnboardError('');
+    setShowInstitutionModal(false);
+  };
+
+  const handleInstitutionOnboard = async () => {
+    if (!onboardEmail.trim() || !onboardRegNo.trim()) {
+      setOnboardError('Email and registration number are required.');
+      return;
+    }
+    setOnboardError('');
+    setShowInstitutionModal(false);
+  };
 
   // Update clock
   useEffect(() => {
@@ -315,6 +397,31 @@ export default function App() {
       }
     })();
   }, [user, appId]);
+
+  // Restore department on startup if authorized
+  useEffect(() => {
+    if (isStaffRole) {
+      const depId = localStorage.getItem('activeDepartmentId');
+      const depName = localStorage.getItem('activeDepartmentName');
+      if (depId) setActiveDepartmentId(depId);
+      if (depName) setActiveDepartmentName(depName);
+    }
+  }, [isStaffRole]);
+
+  // Load departments if authorized
+  useEffect(() => {
+    async function loadDeps() {
+      try {
+        if (isStaffRole && userProfile?.institutionId) {
+          const deps = await getDepartments(userProfile.institutionId);
+          setInstitutionDepartments(Array.isArray(deps) ? deps : []);
+        }
+      } catch (e) {
+        console.error("Failed to load departments:", e);
+      }
+    }
+    loadDeps();
+  }, [isStaffRole, userProfile]);
 
   // Persist region preference when changed
   useEffect(() => {
@@ -436,6 +543,20 @@ export default function App() {
       if (res.ok && j.image) return j.image;
       throw new Error(j.error || 'No image');
     } catch (e) { throw e; }
+  };
+
+  const studentGenerateImage = async (prompt) => {
+    const idToken = user ? await user.getIdToken() : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (idToken) headers.Authorization = `Bearer ${idToken}`;
+    const res = await fetch(apiUrl('/api/image/student'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ prompt }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok && j.image) return j.image;
+    throw new Error(j.error || 'Image generation failed');
   };
 
   const saveImageToMyStuff = async (imgDataUrl) => {
@@ -597,14 +718,15 @@ export default function App() {
 
       const rulePrefix = `RULE: Always answer on the home chat. Do not tell user to navigate to modules. Use institution info when relevant; otherwise use global info. QUESTION:`;
 
-      const isImageReq = /(generate|create|show|draw|make).*(image|picture|photo|illustration|flag|draw)/i.test(text);
+      const isImageReq = /(generate|create|show|draw|make|image|picture|photo|illustration|flag|logo|poster|banner|in image form|as an image)/i.test(text);
       if (isImageReq) {
         try {
           const examStyle = "Make it clean, high-contrast, exam-ready, well-labeled if diagram, minimal clutter.";
           const imgPrompt = `${text}\n\n${examStyle}`;
 
           let imgDataUrl = null;
-          if (adminToken) {
+          try { imgDataUrl = await studentGenerateImage(imgPrompt); } catch (e) { imgDataUrl = null; }
+          if (!imgDataUrl && adminToken) {
             try { imgDataUrl = await serverGenerateImage(imgPrompt); } catch(e) { imgDataUrl = null; }
           }
           if (!imgDataUrl) imgDataUrl = await imageAPI.generateImage(imgPrompt);
@@ -758,6 +880,27 @@ export default function App() {
     userRole === 'staff' ? 'Staff Console' :
     'Public Explore';
 
+  // Permission gate for /institution/admin
+  if (path.startsWith('/institution/admin')) {
+    const allowedRoles = ['staff', 'departmentAdmin', 'superAdmin'];
+    if (!allowedRoles.includes(userRole)) {
+      window.history.replaceState({}, '', '/');
+      window.location.reload();
+      return null;
+    }
+    const institutionId = userProfile?.institutionId;
+    return (
+      <AdminDashboard
+        db={db}
+        userRole={userRole}
+        institutionId={institutionId}
+        departmentId={activeDepartmentId}
+        departmentName={activeDepartmentName}
+        onExit={() => { window.history.pushState({}, '', '/'); setPath('/'); }}
+      />
+    );
+  }
+
   // If critical env vars missing, show error panel instead of app
   if (envError && envError.length > 0) {
     return (
@@ -900,6 +1043,45 @@ export default function App() {
             </>
           )}
           <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
+          {/* Institution Sidebar Section */}
+          <div className="mt-2">
+            <button
+              className={`w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors ${
+                isStaffRole ? 'text-sky-400 hover:bg-white/5' : 'text-slate-400 hover:bg-white/5'
+              }`}
+              onClick={() => {
+                if (isStaffRole) setInstitutionExpanded(v => !v);
+                else setShowInstitutionModal(true);
+              }}
+            >
+              <FolderHeart size={18} />
+              <span>Institution</span>
+              {!isStaffRole && <Lock size={16} className="ml-1" />}
+              {isStaffRole && (
+                institutionExpanded ? <ChevronUp size={16} className="ml-auto" /> : <ChevronDown size={16} className="ml-auto" />
+              )}
+            </button>
+
+            {/* Department List */}
+            {isStaffRole && institutionExpanded && (
+              <div className="ml-6 mt-1 space-y-1">
+                {institutionDepartments.length === 0 && (
+                  <div className="text-xs text-slate-500">No departments</div>
+                )}
+                {institutionDepartments.map(dep => (
+                  <button
+                    key={dep.id}
+                    className={`w-full text-left px-2 py-1 rounded text-xs ${
+                      activeDepartmentId === dep.id ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-sky-900/30'
+                    }`}
+                    onClick={() => handleDepartmentSelect(dep)}
+                  >
+                    {dep.name || dep.id}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {chatHistory.slice(0, 5).map(chat => (
             <button key={chat.id} onClick={() => { setActiveChatId(chat.id); setMessages(chat.messages || []); }} className="w-full text-left p-2 rounded text-xs truncate text-slate-400 hover:bg-white/5">
               {chat.title || "Previous Chat"}
@@ -917,7 +1099,9 @@ export default function App() {
       <main className={`flex-1 flex flex-col min-w-0 relative ${isMobile ? '' : 'ml-0'}`}>
         {/* Department label and switch banner */}
         <div className="flex items-center gap-2 px-4 pt-2 pb-1">
-          <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">Department: {activeDepartment.name}</span>
+          <span className="text-xs bg-sky-900/40 text-sky-200 px-2 py-1 rounded font-bold">
+            Mode: {activeDepartmentId ? (activeDepartmentName || activeDepartmentId) : 'General'}
+          </span>
         </div>
         {suggestedDept && showDeptBanner && (
           <div className="mx-4 mb-2 p-2 bg-emerald-900/80 border border-emerald-400 rounded flex items-center gap-3 text-xs text-white">
@@ -1256,6 +1440,36 @@ export default function App() {
       </main>
 
       {/* Settings Modal */}
+      {/* Institution Staff Code Modal */}
+      {showInstitutionModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-bold mb-4 text-sky-400">Staff only — enter Staff Code</h2>
+
+            <input
+              className="w-full p-2 rounded bg-slate-800 border border-white/10 text-white mb-2"
+              placeholder="Staff Code"
+              value={staffCodeInput}
+              onChange={e => setStaffCodeInput(e.target.value)}
+              type="password"
+            />
+
+            <button
+              className="w-full bg-sky-500 text-white font-bold py-2 rounded mt-2"
+              onClick={() => verifyStaffCode(staffCodeInput)}
+            >
+              Verify
+            </button>
+
+            <button
+              className="w-full mt-2 text-xs text-slate-400 underline"
+              onClick={() => setShowInstitutionModal(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl">
@@ -1283,7 +1497,7 @@ export default function App() {
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-4">Appearance</label>
                   <div className="flex gap-2">
                     <button onClick={() => setSettings({...settings, theme: 'light'})} className={`flex-1 p-3 rounded-xl border flex items-center justify-center gap-2 text-sm ${settings.theme === 'light' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white/5 border-white/5 text-slate-400'}`}><Sun size={14}/> Light</button>
-                    <button onClick={() => setSettings({...settings, theme: 'dark'})} className={`flex-1 p-3 rounded-xl border flex items-center justify-center gap-2 text-sm ${settings.theme === 'dark' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white/5 border-white/5 text-slate-400'}`}><Moon size={14}/> Dark</button>
+                                       <button onClick={() => setSettings({...settings, theme: 'dark'})} className={`flex-1 p-3 rounded-xl border flex items-center justify-center gap-2 text-sm ${settings.theme === 'dark' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white/5 border-white/5 text-slate-400'}`}><Moon size={14}/> Dark</button>
                   </div>
                 </section>
               </div>

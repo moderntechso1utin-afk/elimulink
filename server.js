@@ -130,6 +130,24 @@ if (!ADMIN_JWT_SECRET) {
 }
 const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || '';
 
+async function generateImageFromOpenAI(prompt) {
+  const r = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+    body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1024x1024', n: 1 })
+  });
+  const data = await r.json().catch(() => ({}));
+  const b64 = data.data?.[0]?.b64_json || data.data?.[0]?.b64_image;
+  if (!r.ok) {
+    const msg = data?.error?.message || `Image provider error: ${r.status}`;
+    throw new Error(msg);
+  }
+  if (!b64) {
+    throw new Error('No image returned');
+  }
+  return `data:image/png;base64,${b64}`;
+}
+
 function requireAdmin(req, res, next) {
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' });
@@ -231,18 +249,27 @@ app.post('/api/image', requireAdmin, async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'prompt required' });
   if (!OPENAI_KEY) return res.status(200).json({ success: false, error: 'Image generation key missing. Update your environment with OPENAI_API_KEY.' });
   try {
-    const r = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-      body: JSON.stringify({ model: 'gpt-image-1', prompt, size: '1024x1024', n: 1 })
-    });
-    const data = await r.json();
-    const b64 = data.data?.[0]?.b64_json || data.data?.[0]?.b64_image;
-    if (!b64) return res.status(502).json({ error: 'No image returned', details: data });
-    return res.json({ image: `data:image/png;base64,${b64}` });
+    const image = await generateImageFromOpenAI(prompt);
+    return res.json({ image });
   } catch (e) {
     console.error('Image error', e);
     return res.status(500).json({ error: e.message });
+  }
+});
+
+// Student image endpoint (requires Firebase user token)
+app.post('/api/image/student', requireUser, async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  if (!OPENAI_KEY) {
+    return res.status(500).json({ error: 'Image generation key missing on backend. Set OPENAI_API_KEY.' });
+  }
+  try {
+    const image = await generateImageFromOpenAI(prompt);
+    return res.json({ ok: true, image });
+  } catch (e) {
+    console.error('[ERROR] /api/image/student', e.message);
+    return res.status(502).json({ error: e.message });
   }
 });
 
