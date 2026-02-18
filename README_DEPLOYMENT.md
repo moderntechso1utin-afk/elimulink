@@ -70,6 +70,32 @@ This folder now contains complete documentation for deploying ElimuLink to Verce
 
 ---
 
+## Dev Restart (Clear Vite Cache)
+
+PowerShell (Windows):
+```powershell
+Remove-Item -Recurse -Force node_modules\.vite
+npm run dev -- --host --port 3000
+```
+
+Bash/macOS:
+```bash
+rm -rf node_modules/.vite
+npm run dev -- --host --port 3000
+```
+
+---
+
+## Firebase Auth Email Templates (Quick Checklist)
+
+Firebase Console → Authentication → Templates:
+- Email address verification (sender name, subject, message)
+- Password reset (sender name, subject, message)
+- Email address change (optional)
+- SMTP settings (optional, for custom sending domain later)
+
+---
+
 ## 🎯 Key Changes Made
 
 ### Code Changes
