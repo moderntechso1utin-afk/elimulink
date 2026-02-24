@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "elimulink-ai"
+    "default": "elimulink-ai",
+    "elimulink-ai": "elimulink-ai"
   },
   "targets": {
     "elimulink-ai": {
@@ -13,6 +14,9 @@
         ],
         "elimulink-institution": [
           "elimulink-institution"
+        ],
+        "elimulink-ai": [
+          "elimulink-ai"
         ]
       }
     }
