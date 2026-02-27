@@ -189,7 +189,7 @@ async function normalizeAvatarImage(file) {
   }
 }
 
-export default function SettingsPage({ user, onBack }) {
+export default function SettingsPage({ user, onBack, canShowAdmin = false, onOpenAdmin }) {
   const uploadInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const [form, setForm] = useState(() =>
@@ -439,6 +439,22 @@ export default function SettingsPage({ user, onBack }) {
               </Button>
             </div>
           </Section>
+
+          {canShowAdmin ? (
+            <Section title="Administration" description="Admin access for institution roles.">
+              <div className="space-y-3">
+                <Button
+                  variant="ghost"
+                  type="button"
+                  className="w-full justify-between"
+                  onClick={() => onOpenAdmin?.()}
+                >
+                  Open Admin Dashboard
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Shortcut</span>
+                </Button>
+              </div>
+            </Section>
+          ) : null}
 
           <Section title="Support" description="Help and account actions.">
             <div className="space-y-3">

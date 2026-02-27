@@ -501,9 +501,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
   const normalizedRole = String(userRole || "").toLowerCase();
   const canShowAdmin = ADMIN_ROLES.has(normalizedRole);
-  const moreItems = canShowAdmin
-    ? [...MORE_ITEMS_BASE, { key: "admin", label: "Admin", icon: Shield }]
-    : MORE_ITEMS_BASE;
+  const moreItems = MORE_ITEMS_BASE;
 
   const moreKeys = moreItems.map((item) => item.key);
 
@@ -581,6 +579,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     setIsProfileMenuOpen(false);
     setIsNotificationsMenuOpen(false);
     setActive("settings");
+  }
+
+  function openAdminPanel() {
+    setIsProfileMenuOpen(false);
+    setIsNotificationsMenuOpen(false);
+    setIsMobileDrawerOpen(false);
+    setIsMobileMoreOpen(false);
+    setIsMorePopupOpen(false);
+    onOpenAdmin?.();
   }
 
   function toggleNotificationsMenu() {
@@ -875,8 +882,33 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, []);
 
+  useEffect(() => {
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    if (!isMobile) return;
+    if (active !== "newchat") {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+      return;
+    }
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [active]);
+
   if (active === "settings") {
-    return <SettingsPage user={user} onBack={() => setActive("newchat")} />;
+    return (
+      <SettingsPage
+        user={user}
+        onBack={() => setActive("newchat")}
+        canShowAdmin={canShowAdmin}
+        onOpenAdmin={openAdminPanel}
+      />
+    );
   }
 
   if (active === "notebook") {
@@ -900,7 +932,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
   }
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-x-hidden md:overflow-hidden">
+    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden">
       <div className="w-full px-3 md:px-4 pt-2 pb-1 shrink-0">
         <div className="h-12 rounded-xl border border-slate-200 bg-white/95 shadow-sm px-2.5 md:px-3 flex items-center gap-2">
           <button
@@ -1121,6 +1153,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                         <Settings size={16} />
                         Settings
                       </button>
+                      {canShowAdmin ? (
+                        <button
+                          onClick={openAdminPanel}
+                          className="w-full text-left px-3 py-3 rounded-xl text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Shield size={16} />
+                          Admin
+                        </button>
+                      ) : null}
                       <button
                         onClick={handleLogout}
                         className="w-full text-left px-3 py-3 rounded-xl text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 flex items-center gap-2"
@@ -1163,6 +1204,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                     <Settings size={15} />
                     Settings
                   </button>
+                  {canShowAdmin ? (
+                    <button
+                      onClick={openAdminPanel}
+                      className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                    >
+                      <Shield size={15} />
+                      Admin
+                    </button>
+                  ) : null}
                   <button
                     onClick={handleLogout}
                     className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40 flex items-center gap-2"
@@ -1373,7 +1423,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
         </div>
       ) : null}
 
-      <div className="w-full px-4 md:px-6 pt-3 pb-6 grid grid-cols-12 gap-6 flex-1 md:min-h-0 overflow-y-auto smart-scrollbar">
+      <div className="w-full px-4 md:px-6 pt-3 pb-6 grid grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
         <aside
           className={[
             "hidden md:block col-span-12 min-h-0",
@@ -1612,11 +1662,11 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
 
         <main
           className={[
-            "col-span-12 min-w-0 flex flex-col overflow-visible md:overflow-hidden md:min-h-0",
+            "col-span-12 min-w-0 flex flex-col overflow-hidden min-h-0",
             isSidebarOpen ? "md:col-span-9 lg:col-span-9" : "md:col-span-11 lg:col-span-11",
           ].join(" ")}
         >
-          <div className="rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden md:flex-1 md:min-h-0 flex flex-col">
+          <div className="rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
             <div className="px-5 py-3 border-b border-slate-200 bg-white/80 shrink-0">
               <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
               <div className="text-xs text-slate-500">
@@ -1634,7 +1684,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole }) {
                 </div>
               ) : null}
 
-              <div className="flex-1 min-h-[320px] md:min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
+              <div className="flex-1 min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
                 {messages.length === 0 ? (
                   <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
                     <div className="text-sm text-slate-500">{timeGreeting()}</div>
