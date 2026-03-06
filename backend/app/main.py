@@ -11,7 +11,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import init_firebase_admin
-from .database import Base, engine
+from .database import Base, engine, DATABASE_URL
 from .routes.chat import router as chat_router
 from .routes.admin_ai import router as admin_ai_router
 from .routes.admin_analytics import router as admin_analytics_router
@@ -112,6 +112,27 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def startup_log() -> None:
   app_id = os.getenv("APP_ID") or os.getenv("VITE_APP_ID") or "unset"
   gemini_present = bool(os.getenv("GEMINI_API_KEY"))
+  env = (os.getenv("APP_ENV") or os.getenv("ENV") or "").strip().lower()
+  if env != "production":
+    try:
+      from urllib.parse import urlparse
+
+      parsed = urlparse(DATABASE_URL)
+      safe_host = parsed.hostname or "unknown"
+      print(f"[STARTUP] DATABASE_URL host={safe_host}")
+    except Exception:
+      print("[STARTUP] DATABASE_URL host=unknown")
+  if os.getenv("RUN_MIGRATIONS") == "1":
+    try:
+      from alembic import command
+      from alembic.config import Config
+
+      base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+      alembic_cfg = Config(os.path.join(base_dir, "alembic.ini"))
+      command.upgrade(alembic_cfg, "head")
+      print("[STARTUP] Alembic migrations applied")
+    except Exception as exc:  # noqa: BLE001
+      print(f"[STARTUP] Alembic migration failed: {exc}")
   print(f"[STARTUP] API running | gemini_key_present={gemini_present} | APP_ID={app_id}")
 app.include_router(health_router)
 app.include_router(chat_router)
