@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Header, Request
+from fastapi.exceptions import HTTPException
 
 from ..auth import CurrentUser
 from ..core.dependencies import get_db
@@ -28,7 +29,11 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
         detail = getattr(exc, "detail", {}) or {}
         return err_response(str(detail.get("code") or "BAD_REQUEST"), status)
 
-    user = resolve_user_from_header(authorization) or CurrentUser(uid="public", role="public")
+    try:
+        user = resolve_user_from_header(authorization)
+    except HTTPException:
+        user = None
+    user = user or CurrentUser(uid="public", role="public")
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
 
@@ -65,7 +70,14 @@ async def ai_student(request: Request, authorization: Optional[str] = Header(def
         detail = getattr(exc, "detail", {}) or {}
         return err_response(str(detail.get("code") or "BAD_REQUEST"), status)
 
-    user = resolve_user_from_header(authorization) or CurrentUser(uid="public", role="student")
+    if not authorization:
+        return err_response("AUTH_REQUIRED", 401)
+    try:
+        user = resolve_user_from_header(authorization)
+    except HTTPException:
+        return err_response("AUTH_INVALID", 401)
+    if not user:
+        return err_response("AUTH_REQUIRED", 401)
     rate_limit(user.uid, limit=15, window_sec=60)
     payload = AIChatRequest(**(body or {}))
 
