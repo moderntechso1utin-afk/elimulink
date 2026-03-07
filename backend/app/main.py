@@ -46,11 +46,14 @@ default_origins = [
     "https://elimulink-app-ai.web.app",
     "https://elimulink-student.web.app",
     "https://elimulink-institution.web.app",
+    "https://app.elimulink.co.ke",
+    "https://student.elimulink.co.ke",
+    "https://institution.elimulink.co.ke",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 cors_from_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-allowed_origins = cors_from_env or default_origins
+allowed_origins = list(dict.fromkeys(default_origins + cors_from_env))
 
 app.add_middleware(
     CORSMiddleware,
