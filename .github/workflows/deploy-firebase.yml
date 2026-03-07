@@ -1,0 +1,49 @@
+name: Deploy Firebase Hosting
+
+on:
+  push:
+    branches: [main, institution, student]
+  workflow_dispatch:
+
+jobs:
+  deploy-public:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm i -g firebase-tools
+      - run: firebase deploy --only hosting:elimulink-app-ai --token "${{ secrets.FIREBASE_TOKEN }}"
+
+  deploy-institution:
+    if: github.ref == 'refs/heads/institution'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm i -g firebase-tools
+      - run: firebase deploy --only hosting:elimulink-institution --token "${{ secrets.FIREBASE_TOKEN }}"
+
+  deploy-student:
+    if: github.ref == 'refs/heads/student'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm i -g firebase-tools
+      - run: firebase deploy --only hosting:elimulink-student --token "${{ secrets.FIREBASE_TOKEN }}"

@@ -1,0 +1,493 @@
+=== Repo Root ===
+.
+|-- .firebase
+|   |-- hosting.ZGlzdA.cache
+|   |-- hosting.ZGlzdC1pbnN0aXR1dGlvbg.cache
+|   |-- hosting.ZGlzdC1wdWJsaWM.cache
+|   `-- hosting.ZGlzdC1zdHVkZW50.cache
+|-- backend
+|   |-- alembic
+|   |   |-- versions
+|   |   |   |-- .gitkeep
+|   |   |   |-- 251dfd244fd3_init.py
+|   |   |   `-- 97feb81885e2_add_ai_chat_and_student_domain_models.py
+|   |   |-- env.py
+|   |   `-- script.py.mako
+|   |-- app
+|   |   |-- core
+|   |   |   |-- __init__.py
+|   |   |   `-- dependencies.py
+|   |   |-- models
+|   |   |   |-- __init__.py
+|   |   |   |-- academics.py
+|   |   |   |-- ai_log.py
+|   |   |   |-- announcement.py
+|   |   |   |-- attendance.py
+|   |   |   |-- chat.py
+|   |   |   |-- finance.py
+|   |   |   |-- student.py
+|   |   |   |-- tenant.py
+|   |   |   `-- user.py
+|   |   |-- repositories
+|   |   |   |-- __init__.py
+|   |   |   |-- chat_repository.py
+|   |   |   `-- student_repository.py
+|   |   |-- routes
+|   |   |   |-- __init__.py
+|   |   |   |-- admin_ai.py
+|   |   |   |-- admin_analytics.py
+|   |   |   |-- admin_settings.py
+|   |   |   |-- ai.py
+|   |   |   |-- announcements.py
+|   |   |   |-- assignments.py
+|   |   |   |-- attendance.py
+|   |   |   |-- audit.py
+|   |   |   |-- chat.py
+|   |   |   |-- courses.py
+|   |   |   |-- finance.py
+|   |   |   |-- groups.py
+|   |   |   |-- health.py
+|   |   |   |-- image.py
+|   |   |   |-- reports.py
+|   |   |   |-- results.py
+|   |   |   |-- student_ai.py
+|   |   |   |-- subgroups.py
+|   |   |   |-- tts.py
+|   |   |   `-- users.py
+|   |   |-- schemas
+|   |   |   |-- __init__.py
+|   |   |   |-- ai.py
+|   |   |   `-- chat.py
+|   |   |-- services
+|   |   |   |-- __init__.py
+|   |   |   |-- ai_orchestrator.py
+|   |   |   |-- ai_service.py
+|   |   |   |-- analytics_service.py
+|   |   |   |-- auth_service.py
+|   |   |   |-- file_service.py
+|   |   |   |-- gemini_client.py
+|   |   |   |-- intent_router.py
+|   |   |   |-- memory_service.py
+|   |   |   |-- permission_service.py
+|   |   |   |-- prompt_builder.py
+|   |   |   `-- settings_store.py
+|   |   |-- tools
+|   |   |   |-- __init__.py
+|   |   |   `-- student_tools.py
+|   |   |-- utils
+|   |   |   |-- __init__.py
+|   |   |   |-- errors.py
+|   |   |   |-- ids.py
+|   |   |   |-- logging.py
+|   |   |   `-- time.py
+|   |   |-- auth.py
+|   |   |-- config.py
+|   |   |-- database.py
+|   |   |-- firestore.py
+|   |   |-- main.py
+|   |   |-- models.py
+|   |   |-- schemas.py
+|   |   `-- utils.py
+|   |-- backend
+|   |   |-- data
+|   |   `-- uploads
+|   |-- data
+|   |-- uploads
+|   |-- .env
+|   |-- .env.example
+|   |-- alembic.ini
+|   |-- elimulink.db
+|   |-- requirements.txt
+|   |-- uvicorn.err.log
+|   |-- uvicorn.out.log
+|   |-- uvicorn_probe.err.log
+|   |-- uvicorn_probe.out.log
+|   |-- uvicorn_reload.err.log
+|   |-- uvicorn_reload.out.log
+|   |-- uvicorn_reload_escalated.err.log
+|   |-- uvicorn_reload_escalated.out.log
+|   |-- uvicorn_smoke.err.log
+|   |-- uvicorn_smoke.out.log
+|   |-- uvicorn8001.err.log
+|   `-- uvicorn8001.out.log
+|-- dist
+|   |-- assets
+|   |   |-- index-CKXip62u.css
+|   |   `-- index-VodVdBpC.js
+|   |-- icons
+|   |   |-- icon-192.svg
+|   |   |-- icon-512.svg
+|   |   `-- maskable_icon.svg
+|   |-- icon.svg
+|   |-- index.CRA_BACKUP.html
+|   |-- index.html
+|   |-- loader-logo.svg
+|   `-- manifest.json
+|-- dist-institution
+|   |-- assets
+|   |   |-- index-CKXip62u.css
+|   |   `-- index-VodVdBpC.js
+|   |-- icons
+|   |   |-- icon-192.svg
+|   |   |-- icon-512.svg
+|   |   `-- maskable_icon.svg
+|   |-- icon.svg
+|   |-- index.CRA_BACKUP.html
+|   |-- index.html
+|   |-- loader-logo.svg
+|   `-- manifest.json
+|-- dist-student
+|   |-- assets
+|   |   |-- index-B2x8hX14.js
+|   |   `-- index-Bl9fcY1Z.css
+|   |-- icons
+|   |   |-- icon-192.svg
+|   |   |-- icon-512.svg
+|   |   `-- maskable_icon.svg
+|   |-- icon.svg
+|   |-- index.CRA_BACKUP.html
+|   |-- index.html
+|   |-- loader-logo.svg
+|   `-- manifest.json
+|-- public
+|   |-- icons
+|   |   |-- icon-192.svg
+|   |   |-- icon-512.svg
+|   |   `-- maskable_icon.svg
+|   |-- icon.svg
+|   |-- index.CRA_BACKUP.html
+|   |-- loader-logo.svg
+|   `-- manifest.json
+|-- scripts
+|   |-- deploy.sh
+|   `-- seedInstitution.mjs
+|-- src
+|   |-- components
+|   |   `-- PhoneFrame.jsx
+|   |-- institution
+|   |   |-- components
+|   |   |   |-- Sidebar.jsx
+|   |   |   |-- StatCard.jsx
+|   |   |   `-- Topbar.jsx
+|   |   |-- pages
+|   |   |   |-- Analytics.jsx
+|   |   |   |-- Announcements.jsx
+|   |   |   |-- Courses.jsx
+|   |   |   |-- Dashboard.jsx
+|   |   |   |-- NewChat.jsx
+|   |   |   |-- Notebook.jsx
+|   |   |   |-- NotebookPage.jsx
+|   |   |   |-- Planning.jsx
+|   |   |   |-- Search.jsx
+|   |   |   |-- Settings.jsx
+|   |   |   `-- Students.jsx
+|   |   `-- InstitutionApp.jsx
+|   |-- lib
+|   |   |-- apiClient.js
+|   |   |-- apiUrl.js
+|   |   |-- firebase.js
+|   |   |-- institution.js
+|   |   |-- institutionAdmin.js
+|   |   |-- runtimeConfig.js
+|   |   |-- theme.js
+|   |   |-- userSettings.js
+|   |   `-- voice.js
+|   |-- pages
+|   |   |-- institution
+|   |   |   |-- AdminDashboard.jsx
+|   |   |   |-- InstitutionAdminDashboard.jsx
+|   |   |   |-- InstitutionAssignments.jsx
+|   |   |   |-- InstitutionHome.jsx
+|   |   |   `-- InstitutionNotebook.jsx
+|   |   |-- AdminAnalyticsLanding.jsx
+|   |   |-- AdminLanding.jsx
+|   |   |-- AssignmentsPage.jsx
+|   |   |-- CoursesDashboard.jsx
+|   |   |-- NewChatLanding.jsx
+|   |   |-- NotebookPage.jsx
+|   |   |-- ResultsPage.jsx
+|   |   |-- SettingsPage.jsx
+|   |   `-- SubgroupRoom.jsx
+|   |-- routing
+|   |   |-- hostMode.ts
+|   |   `-- HostRouter.jsx
+|   |-- services
+|   |   |-- geminiAPI.js
+|   |   `-- imageAPI.js
+|   |-- student
+|   |   |-- StudentApp.jsx
+|   |   `-- StudentLanding.jsx
+|   |-- App.jsx
+|   |-- App.jsx.backup
+|   |-- index.css
+|   |-- index.jsx
+|   `-- SplashScreen.jsx
+|-- .env.example
+|-- .env.institution.local
+|-- .env.institution.production
+|-- .env.local
+|-- .env.production
+|-- .env.public.local
+|-- .env.public.production
+|-- .env.student.local
+|-- .env.student.production
+|-- .firebaserc
+|-- .gitignore
+|-- .tmp-dev-err.log
+|-- .tmp-dev-out.log
+|-- .vercelignore
+|-- api.out.log
+|-- backend.live.err.log
+|-- backend.live.out.log
+|-- backend_run.err.log
+|-- backend_run.out.log
+|-- backend_uvicorn.err.log
+|-- backend_uvicorn.log
+|-- DEPLOY_READY.md
+|-- DEPLOYMENT.md
+|-- DEPLOYMENT_SUMMARY.md
+|-- dev.err.log
+|-- dev.out.log
+|-- dev_run.err
+|-- dev_run.out
+|-- DIAGNOSTIC_CHECKLIST.md
+|-- elimulink.db
+|-- env.backup
+|-- FETCH_ERROR_FIX.md
+|-- FETCH_ERROR_SUMMARY.md
+|-- firebase.json
+|-- firebase-debug.log
+|-- firebase-firestore-debug.txt
+|-- firestore.rules
+|-- how false
+|-- index.html
+|-- INVESTIGATION_REPORT.md
+|-- package.json
+|-- package-lock.json
+|-- postcss.config.js
+|-- QUICK_FIX.md
+|-- QUICK_REFERENCE.md
+|-- README_DEPLOYMENT.md
+|-- render.yaml
+|-- SANITY_TREE_REPORT.txt
+|-- server.js
+|-- SETUP_GUIDE.md
+|-- STATUS.md
+|-- tailwind.config.js
+|-- vercel.json
+|-- VERCEL_DEPLOYMENT_READY.md
+|-- VERCEL_ENV_VARS.md
+|-- vite.api-fix.err.log
+|-- vite.api-fix.out.log
+|-- vite.cleanrestart.err.log
+|-- vite.cleanrestart.out.log
+|-- vite.config.js
+|-- vite.dev.current.err.log
+|-- vite.dev.current.log
+|-- vite.dev.err.log
+|-- vite.dev.out.log
+|-- vite.dev.run.err.log
+|-- vite.dev.run.out.log
+|-- vite.err.log
+|-- vite.final.err.log
+|-- vite.final.log
+|-- vite.live.err.log
+|-- vite.live.out.log
+|-- vite.out.log
+|-- vite.quick.err.log
+|-- vite.quick.log
+|-- vite.restart.err.log
+|-- vite.restart.log
+|-- vite.restart.now.err.log
+|-- vite.restart.now.out.log
+|-- vite.run.err.log
+|-- vite.run.out.log
+|-- vite.verify.err.log
+|-- vite.verify.out.log
+|-- vite-err.log
+`-- vite-out.log
+
+=== backend/ ===
+.
+|-- alembic
+|   |-- versions
+|   |   |-- .gitkeep
+|   |   |-- 251dfd244fd3_init.py
+|   |   `-- 97feb81885e2_add_ai_chat_and_student_domain_models.py
+|   |-- env.py
+|   `-- script.py.mako
+|-- app
+|   |-- core
+|   |   |-- __init__.py
+|   |   `-- dependencies.py
+|   |-- models
+|   |   |-- __init__.py
+|   |   |-- academics.py
+|   |   |-- ai_log.py
+|   |   |-- announcement.py
+|   |   |-- attendance.py
+|   |   |-- chat.py
+|   |   |-- finance.py
+|   |   |-- student.py
+|   |   |-- tenant.py
+|   |   `-- user.py
+|   |-- repositories
+|   |   |-- __init__.py
+|   |   |-- chat_repository.py
+|   |   `-- student_repository.py
+|   |-- routes
+|   |   |-- __init__.py
+|   |   |-- admin_ai.py
+|   |   |-- admin_analytics.py
+|   |   |-- admin_settings.py
+|   |   |-- ai.py
+|   |   |-- announcements.py
+|   |   |-- assignments.py
+|   |   |-- attendance.py
+|   |   |-- audit.py
+|   |   |-- chat.py
+|   |   |-- courses.py
+|   |   |-- finance.py
+|   |   |-- groups.py
+|   |   |-- health.py
+|   |   |-- image.py
+|   |   |-- reports.py
+|   |   |-- results.py
+|   |   |-- student_ai.py
+|   |   |-- subgroups.py
+|   |   |-- tts.py
+|   |   `-- users.py
+|   |-- schemas
+|   |   |-- __init__.py
+|   |   |-- ai.py
+|   |   `-- chat.py
+|   |-- services
+|   |   |-- __init__.py
+|   |   |-- ai_orchestrator.py
+|   |   |-- ai_service.py
+|   |   |-- analytics_service.py
+|   |   |-- auth_service.py
+|   |   |-- file_service.py
+|   |   |-- gemini_client.py
+|   |   |-- intent_router.py
+|   |   |-- memory_service.py
+|   |   |-- permission_service.py
+|   |   |-- prompt_builder.py
+|   |   `-- settings_store.py
+|   |-- tools
+|   |   |-- __init__.py
+|   |   `-- student_tools.py
+|   |-- utils
+|   |   |-- __init__.py
+|   |   |-- errors.py
+|   |   |-- ids.py
+|   |   |-- logging.py
+|   |   `-- time.py
+|   |-- auth.py
+|   |-- config.py
+|   |-- database.py
+|   |-- firestore.py
+|   |-- main.py
+|   |-- models.py
+|   |-- schemas.py
+|   `-- utils.py
+|-- backend
+|   |-- data
+|   `-- uploads
+|-- data
+|-- uploads
+|-- .env
+|-- .env.example
+|-- alembic.ini
+|-- elimulink.db
+|-- requirements.txt
+|-- uvicorn.err.log
+|-- uvicorn.out.log
+|-- uvicorn_probe.err.log
+|-- uvicorn_probe.out.log
+|-- uvicorn_reload.err.log
+|-- uvicorn_reload.out.log
+|-- uvicorn_reload_escalated.err.log
+|-- uvicorn_reload_escalated.out.log
+|-- uvicorn_smoke.err.log
+|-- uvicorn_smoke.out.log
+|-- uvicorn8001.err.log
+`-- uvicorn8001.out.log
+
+=== backend/app/ ===
+.
+|-- core
+|   |-- __init__.py
+|   `-- dependencies.py
+|-- models
+|   |-- __init__.py
+|   |-- academics.py
+|   |-- ai_log.py
+|   |-- announcement.py
+|   |-- attendance.py
+|   |-- chat.py
+|   |-- finance.py
+|   |-- student.py
+|   |-- tenant.py
+|   `-- user.py
+|-- repositories
+|   |-- __init__.py
+|   |-- chat_repository.py
+|   `-- student_repository.py
+|-- routes
+|   |-- __init__.py
+|   |-- admin_ai.py
+|   |-- admin_analytics.py
+|   |-- admin_settings.py
+|   |-- ai.py
+|   |-- announcements.py
+|   |-- assignments.py
+|   |-- attendance.py
+|   |-- audit.py
+|   |-- chat.py
+|   |-- courses.py
+|   |-- finance.py
+|   |-- groups.py
+|   |-- health.py
+|   |-- image.py
+|   |-- reports.py
+|   |-- results.py
+|   |-- student_ai.py
+|   |-- subgroups.py
+|   |-- tts.py
+|   `-- users.py
+|-- schemas
+|   |-- __init__.py
+|   |-- ai.py
+|   `-- chat.py
+|-- services
+|   |-- __init__.py
+|   |-- ai_orchestrator.py
+|   |-- ai_service.py
+|   |-- analytics_service.py
+|   |-- auth_service.py
+|   |-- file_service.py
+|   |-- gemini_client.py
+|   |-- intent_router.py
+|   |-- memory_service.py
+|   |-- permission_service.py
+|   |-- prompt_builder.py
+|   `-- settings_store.py
+|-- tools
+|   |-- __init__.py
+|   `-- student_tools.py
+|-- utils
+|   |-- __init__.py
+|   |-- errors.py
+|   |-- ids.py
+|   |-- logging.py
+|   `-- time.py
+|-- auth.py
+|-- config.py
+|-- database.py
+|-- firestore.py
+|-- main.py
+|-- models.py
+|-- schemas.py
+`-- utils.py
+

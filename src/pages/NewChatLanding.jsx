@@ -35,6 +35,9 @@ import {
   Mic,
   MicOff,
   Search,
+  Share2,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   X,
 } from "lucide-react";
@@ -76,6 +79,81 @@ const CHAT_ACTIVE_KEY = "institution_chat_active_v1";
 const ACTIVE_VIEW_KEY = "institution_active_view_v1";
 const UNTITLED_CHAT_BASE = "New Chat";
 const AI_PATH = "/api/ai/chat";
+
+const ACADEMIC_STARTERS = [
+  {
+    key: "assignment_help",
+    label: "Assignment help",
+    emoji: "📝",
+    prefill: "Help me with this assignment...",
+    suggestions: [
+      "Help me answer this assignment step by step",
+      "Explain this assignment question in simple terms",
+      "Help me structure my response",
+      "Give me a similar practice question",
+    ],
+  },
+  {
+    key: "notes_summary",
+    label: "Notes summary",
+    emoji: "📚",
+    prefill: "Summarize these notes...",
+    suggestions: [
+      "Turn these notes into revision points",
+      "Summarize this lecture in simple terms",
+      "Create flashcards from this topic",
+      "Extract the key ideas only",
+    ],
+  },
+  {
+    key: "exam_prep",
+    label: "Exam prep",
+    emoji: "🎯",
+    prefill: "Help me revise...",
+    suggestions: [
+      "Quiz me on this topic",
+      "Give me likely exam questions",
+      "Explain this topic for revision",
+      "Create a short revision guide",
+    ],
+  },
+  {
+    key: "research",
+    label: "Research",
+    emoji: "🔎",
+    prefill: "Help me research...",
+    suggestions: [
+      "Help me find sources for this topic",
+      "Turn this topic into research questions",
+      "Summarize the background of this topic",
+      "Help me build a research outline",
+    ],
+  },
+  {
+    key: "writing_help",
+    label: "Writing help",
+    emoji: "✍️",
+    prefill: "Help me write...",
+    suggestions: [
+      "Help me write an introduction",
+      "Improve this paragraph academically",
+      "Rewrite this in a formal tone",
+      "Help me organize my ideas",
+    ],
+  },
+  {
+    key: "code_help",
+    label: "Code help",
+    emoji: "💻",
+    prefill: "Help me...",
+    suggestions: [
+      "Help me debug my code",
+      "Help me write a function",
+      "Help me simplify my code",
+      "Help me learn this programming concept",
+    ],
+  },
+];
 
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -266,28 +344,189 @@ function isErrorText(text) {
   return value.includes("failed to reach ai service") || value.includes("error (");
 }
 
-function Bubble({ role, text, onAssistantSpeak, onRetry, onLearnMore, onCopy, onEdit, isCopied, isSpeaking, speakingText }) {
+function Bubble({
+  role,
+  text,
+  onAssistantSpeak,
+  onRetry,
+  onLearnMore,
+  onCopy,
+  onEdit,
+  isCopied,
+  isSpeaking,
+  speakingText,
+  reaction = null,
+  onLike,
+  onDislike,
+  onShare,
+  onRetryMessage,
+  onSimplify,
+  onDetailed,
+}) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
   const isActiveSpeak = !isUser && isSpeaking && speakingText === text;
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const showActionRow = Boolean(reaction) || isMoreOpen;
+  const assistantParagraphs = String(text || "")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  function renderAssistantBlock(block, index) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    const isBulletLike =
+      lines.length > 1 &&
+      lines.every((line) => /^([-*•]|\d+\.)\s+/.test(line));
+
+    if (isBulletLike) {
+      return (
+        <ul key={`blk-${index}`} className="list-disc pl-5 space-y-1.5">
+          {lines.map((line, i) => (
+            <li key={`li-${index}-${i}`}>{line.replace(/^([-*•]|\d+\.)\s+/, "")}</li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <p key={`blk-${index}`} className="leading-[1.72]">
+        {block}
+      </p>
+    );
+  }
+
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[88%] rounded-2xl px-4 py-3 text-base leading-relaxed shadow-sm",
+          "max-w-[92%] md:max-w-[84%] rounded-2xl px-4 py-3 text-[15px] shadow-sm",
           isUser
             ? "bg-sky-500 text-white rounded-br-md"
             : "bg-white text-slate-900 border border-slate-200 rounded-bl-md",
         ].join(" ")}
       >
-        <div>{text}</div>
+        {isUser ? (
+          <div className="leading-relaxed">{text}</div>
+        ) : (
+          <div className="space-y-3 text-[15px] text-slate-800">
+            {(assistantParagraphs.length ? assistantParagraphs : [String(text || "")]).map((block, idx) =>
+              renderAssistantBlock(block, idx)
+            )}
+          </div>
+        )}
 
         {!isUser ? (
-          <div className="mt-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div
+            className={[
+              "mt-2.5 flex flex-wrap items-center gap-1.5 transition-opacity",
+              showActionRow ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100",
+            ].join(" ")}
+          >
+            <button
+              type="button"
+              onClick={onCopy}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              title="Copy response"
+            >
+              {isCopied ? <Check size={12} /> : <Copy size={12} />}
+              {isCopied ? "Copied" : "Copy"}
+            </button>
+            <button
+              type="button"
+              onClick={onLike}
+              className={[
+                "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition",
+                reaction === "like"
+                  ? "border-sky-200 bg-sky-50 text-sky-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+              ].join(" ")}
+              title="Like"
+            >
+              <ThumbsUp size={12} />
+              Like
+            </button>
+            <button
+              type="button"
+              onClick={onDislike}
+              className={[
+                "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition",
+                reaction === "dislike"
+                  ? "border-slate-300 bg-slate-200/70 text-slate-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+              ].join(" ")}
+              title="Dislike"
+            >
+              <ThumbsDown size={12} />
+              Dislike
+            </button>
+            <button
+              type="button"
+              onClick={onShare}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              title="Share"
+            >
+              <Share2 size={12} />
+              Share
+            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsMoreOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+                title="More"
+              >
+                <Ellipsis size={12} />
+                More
+              </button>
+              {isMoreOpen ? (
+                <div className="absolute left-0 top-full mt-1.5 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg z-10">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreOpen(false);
+                      onRetryMessage?.();
+                    }}
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreOpen(false);
+                      onSimplify?.();
+                    }}
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                  >
+                    Simplify answer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreOpen(false);
+                      onDetailed?.();
+                    }}
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                  >
+                    Make it more detailed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreOpen(false);
+                      onCopy?.();
+                    }}
+                    className="w-full rounded-lg px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                  >
+                    Copy text
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => onAssistantSpeak?.(text)}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
               title="Play audio"
             >
               <Volume2 size={13} />
@@ -431,11 +670,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   const [isAiModeOn, setIsAiModeOn] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const [voices, setVoices] = useState([]);
-  const [kb, setKb] = useState({ offset: 0, height: 0 });
+  const [kbHeight, setKbHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(108);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingText, setSpeakingText] = useState("");
   const [lastPrompt, setLastPrompt] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
+  const [feedbackByMessage, setFeedbackByMessage] = useState({});
+  const [feedbackToast, setFeedbackToast] = useState({ open: false, text: "" });
+  const [selectedStarter, setSelectedStarter] = useState(null);
+  const [starterSuggestions, setStarterSuggestions] = useState([]);
   const recognitionRef = useRef(null);
   const attachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
@@ -444,6 +688,9 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   const notifBtnRef = useRef(null);
   const globalSearchInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const mobileMessagesRef = useRef(null);
+  const desktopMessagesRef = useRef(null);
+  const mobileComposerRef = useRef(null);
   const promptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
   const renderCountRef = useRef(0);
@@ -511,24 +758,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     if (typeof window === "undefined") return;
     const vv = window.visualViewport;
     if (!vv) return;
-    const isMobile = window.matchMedia("(max-width: 767px)").matches;
-    const prevOverflow = document.body.style.overflow;
-    if (isMobile) {
-      document.body.style.overflow = "hidden";
-    }
-    const onVV = () => {
-      const layoutH = window.innerHeight;
-      const vvBottom = vv.height + vv.offsetTop;
-      const keyboard = Math.max(0, layoutH - vvBottom);
-      setKb({ height: keyboard, offset: vv.offsetTop });
+    const update = () => {
+      const keyboard = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      setKbHeight(keyboard);
     };
-    onVV();
-    vv.addEventListener("resize", onVV);
-    vv.addEventListener("scroll", onVV);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
     return () => {
-      vv.removeEventListener("resize", onVV);
-      vv.removeEventListener("scroll", onVV);
-      document.body.style.overflow = prevOverflow;
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
     };
   }, []);
 
@@ -734,22 +973,12 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
 
   const activePlaceholder = placeholderConfig[active];
 
-  const quickPrompts = useMemo(
-    () => [
-      { label: "Summarize Biology lecture", icon: "✨" },
-      { label: "Explain Photosynthesis", icon: "🌿" },
-      { label: "Prep for History 202 exam", icon: "📘" },
-      { label: "Write assignment draft", icon: "📝" },
-      { label: "Help me learn", icon: "🎓" },
-    ],
-    []
-  );
-
   const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
   const hasConversation = messages.length > 0;
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const hasText = input.trim().length > 0;
+  const hasStarterSuggestions = !hasConversation && starterSuggestions.length > 0;
   const unreadNotifications = notifications.filter((item) => !item.read).length;
   const normalizedNotifications = useMemo(
     () =>
@@ -765,9 +994,43 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   );
   const profileInitials = initialsOf(user.name);
 
+  const scrollToBottom = (behavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    if (mobileMessagesRef.current) {
+      mobileMessagesRef.current.scrollTo({ top: mobileMessagesRef.current.scrollHeight, behavior });
+    }
+    if (desktopMessagesRef.current) {
+      desktopMessagesRef.current.scrollTo({ top: desktopMessagesRef.current.scrollHeight, behavior });
+    }
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, activeChatId]);
+    const id = requestAnimationFrame(() => scrollToBottom("smooth"));
+    return () => cancelAnimationFrame(id);
+  }, [messages.length, activeChatId]);
+
+  useEffect(() => {
+    const id = setTimeout(() => scrollToBottom("auto"), 50);
+    return () => clearTimeout(id);
+  }, [kbHeight]);
+
+  useEffect(() => {
+    if (!mobileComposerRef.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const next = Math.ceil(entry.contentRect.height);
+      if (next > 0) setComposerHeight(next);
+    });
+    observer.observe(mobileComposerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!feedbackToast.open) return;
+    const id = setTimeout(() => setFeedbackToast({ open: false, text: "" }), 2200);
+    return () => clearTimeout(id);
+  }, [feedbackToast]);
 
   function updateActiveChatMessages(updater, titleHint) {
     const currentId = activeChat?.id;
@@ -946,6 +1209,46 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
+  function applyStarter(starter) {
+    setSelectedStarter(starter.key);
+    setInput(starter.prefill);
+    setStarterSuggestions(starter.suggestions);
+    requestAnimationFrame(() => promptInputRef.current?.focus());
+  }
+
+  function applySuggestion(suggestion) {
+    setInput(suggestion);
+    requestAnimationFrame(() => promptInputRef.current?.focus());
+  }
+
+  function setMessageFeedback(messageKey, reaction) {
+    setFeedbackByMessage((prev) => {
+      const current = prev[messageKey];
+      const next = current === reaction ? null : reaction;
+      return { ...prev, [messageKey]: next };
+    });
+    setFeedbackToast({ open: true, text: "Thank you for your feedback!" });
+  }
+
+  async function shareAssistantMessage(text) {
+    const value = String(text || "").trim();
+    if (!value) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: value });
+        return;
+      }
+    } catch {
+      // fallback to clipboard below
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setFeedbackToast({ open: true, text: "Response copied for sharing." });
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
   function handleFileInputChange(event) {
     const files = event.target.files;
     addFiles(files, attachmentSourceRef.current || "file");
@@ -993,6 +1296,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     }
   }
 
+  async function isBackendHealthy() {
+    try {
+      const response = await fetch(apiUrl("/api/health"));
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async function sendMessage(text) {
     const pendingAttachments = attachments;
     const clean = text.trim();
@@ -1010,6 +1322,9 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     if (clean) setLastPrompt(clean);
     setInput("");
     setAttachments([]);
+    setSelectedStarter(null);
+    setStarterSuggestions([]);
+    requestAnimationFrame(() => scrollToBottom("smooth"));
 
     try {
       const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
@@ -1044,12 +1359,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
       }
       if (!response.ok) {
         const message = result?.message || result?.error || "AI service unavailable.";
+        const backendHealthy =
+          response.status === 404 ? await isBackendHealthy() : true;
         updateActiveChatMessages(
           (m) => [
             ...m,
             {
               role: "assistant",
-              text: `I couldn't reach the AI service (status ${response.status}). ${message}`,
+              text: backendHealthy
+                ? `I couldn't reach the AI service (status ${response.status}). ${message}`
+                : "Backend is unavailable (health check failed). Please try again later.",
             },
           ],
           clean || "Error"
@@ -1060,8 +1379,17 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
       const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
       updateActiveChatMessages((m) => [...m, { role: "assistant", text: reply }], clean || "Reply");
     } catch {
+      const backendHealthy = await isBackendHealthy();
       updateActiveChatMessages(
-        (m) => [...m, { role: "assistant", text: "Failed to reach AI service." }],
+        (m) => [
+          ...m,
+          {
+            role: "assistant",
+            text: backendHealthy
+              ? "Failed to reach AI service."
+              : "Backend is unavailable (health check failed). Please try again later.",
+          },
+        ],
         clean || "Request failed"
       );
     }
@@ -1233,11 +1561,35 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   }
 
   if (active === "profile") {
+    const name = firebaseUser?.displayName || "Student";
+    const email = firebaseUser?.email || "—";
+    const photo = firebaseUser?.photoURL || null;
+    const uid = firebaseUser?.uid || "—";
+    const role = userRole || "unknown";
     return (
       <div className="min-h-[100dvh] bg-slate-50 text-slate-900 flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="text-lg font-semibold text-slate-900">Profile</div>
-          <div className="text-sm text-slate-600 mt-1">Profile details will appear here.</div>
+          <div className="mt-4 flex items-center gap-3">
+            <div className="h-14 w-14 rounded-full overflow-hidden bg-slate-900 text-white flex items-center justify-center text-sm font-semibold">
+              {photo ? <img src={photo} alt="Profile avatar" className="h-full w-full object-cover" /> : initialsOf(name)}
+            </div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold text-slate-900 truncate">{name}</div>
+              <div className="text-sm text-slate-600 truncate">{email}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2 text-sm text-slate-700">
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+              <span className="text-slate-500">UID</span>
+              <span className="ml-3 truncate max-w-[60%]">{uid}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+              <span className="text-slate-500">Role</span>
+              <span className="ml-3 truncate max-w-[60%]">{role}</span>
+            </div>
+          </div>
           <button
             onClick={() => syncActiveView("newchat", "push")}
             className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
@@ -2221,24 +2573,44 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           />
 
           {active === "newchat" ? (
-            <div className="md:hidden relative h-[100dvh] overflow-hidden bg-slate-50 flex flex-col">
+            <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col">
               <div
+                ref={mobileMessagesRef}
                 className="flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-3"
-                style={
-                  window.matchMedia("(max-width: 767px)").matches
-                    ? { paddingBottom: `calc(96px + env(safe-area-inset-bottom) + ${kb.height}px)` }
-                    : undefined
-                }
+                style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 20px)` }}
               >
                 {messages.length === 0 ? (
-                  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                    <div className="text-sm text-slate-500">{timeGreeting()}</div>
-                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)]">
+                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
+                    <div className="text-[28px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
                       Hi {firstNameOf(user.name)}, where should we start?
                     </div>
-                    <div className="text-sm text-slate-600 mt-1">
-                      Ask anything about coursework, assignments, revision, or research.
+                    <div className="text-sm leading-relaxed text-slate-600 mt-2">
+                      Ask anything about coursework, assignments, revision, research, or coding.
                     </div>
+                  </div>
+                ) : null}
+
+                {messages.length === 0 ? (
+                  <div className="flex flex-wrap items-start gap-1.5 pt-1 pb-2">
+                    {ACADEMIC_STARTERS.map((starter) => {
+                      const isActive = selectedStarter === starter.key;
+                      return (
+                        <button
+                          key={starter.key}
+                          onClick={() => applyStarter(starter)}
+                          className={[
+                            "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-left text-[13px] font-medium leading-tight bg-white/95 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99]",
+                            isActive
+                              ? "border-sky-300 bg-sky-50 text-slate-900"
+                              : "border-slate-200/90 text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                          ].join(" ")}
+                        >
+                          <span className="text-[15px] leading-none">{starter.emoji}</span>
+                          <span>{starter.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : null}
 
@@ -2257,20 +2629,43 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                     onCopy={() => copyPromptText(idx, m.text)}
                     onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
                     isCopied={copiedMessageIndex === idx}
+                    reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
+                    onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
+                    onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
+                    onShare={() => shareAssistantMessage(m.text)}
+                    onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
+                    onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
+                    onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
                   />
                 ))}
                 <div ref={messagesEndRef} />
               </div>
 
               <div
-                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] transition-transform duration-75 md:static md:z-auto"
-                style={
-                  window.matchMedia("(max-width: 767px)").matches
-                    ? { transform: `translateY(-${kb.height}px)` }
-                    : undefined
-                }
+                ref={mobileComposerRef}
+                className="fixed left-0 right-0 bottom-0 z-50 bg-white/95 backdrop-blur border-t border-slate-200 px-3 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] md:static md:z-auto"
+                style={{ bottom: `${kbHeight}px` }}
               >
                 <div className="max-w-xl mx-auto space-y-2">
+                  {hasStarterSuggestions ? (
+                    <div className="rounded-2xl border border-slate-200/80 bg-white/95 shadow-[0_8px_24px_rgba(15,23,42,0.05)] p-2.5">
+                      <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase">
+                        Suggested prompts
+                      </div>
+                      <div className="space-y-1.5">
+                        {starterSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            onClick={() => applySuggestion(suggestion)}
+                            className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {attachments.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {attachments.map((a) => (
@@ -2405,7 +2800,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-2 pb-4" : "p-4", "flex-1 min-h-0 flex flex-col bg-slate-100/60"].join(" ")}>
+            <div className={[hasConversation ? "px-4 pt-3 pb-4" : "p-4", "flex-1 min-h-0 flex flex-col bg-slate-100/60"].join(" ")}>
               {messages.length === 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
@@ -2415,15 +2810,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                 </div>
               ) : null}
 
-              <div className="flex-1 min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
+              <div ref={desktopMessagesRef} className="flex-1 min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
+                <div className="max-w-[740px] w-full mx-auto space-y-3 pb-5">
                 {messages.length === 0 ? (
-                  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-                    <div className="text-sm text-slate-500">{timeGreeting()}</div>
-                    <div className="text-2xl font-semibold text-slate-900 mt-1">
+                  <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
+                    <div className="text-[30px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
                       Hi {firstNameOf(user.name)}, where should we start?
                     </div>
-                    <div className="text-sm text-slate-600 mt-1">
-                      Ask anything about coursework, assignments, revision, or research.
+                    <div className="text-sm leading-relaxed text-slate-600 mt-2">
+                      Ask anything about coursework, assignments, revision, research, or coding.
                     </div>
                   </div>
                 ) : null}
@@ -2443,23 +2839,58 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                     onCopy={() => copyPromptText(idx, m.text)}
                     onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
                     isCopied={copiedMessageIndex === idx}
+                    reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
+                    onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
+                    onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
+                    onShare={() => shareAssistantMessage(m.text)}
+                    onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
+                    onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
+                    onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
                   />
                 ))}
                 <div ref={messagesEndRef} />
+                </div>
               </div>
 
               {messages.length === 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2 shrink-0">
-                  {quickPrompts.map((p) => (
-                    <button
-                      key={p.label}
-                      onClick={() => sendMessage(p.label)}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 hover:bg-white px-4 py-2 text-sm text-slate-700 shadow-sm"
-                    >
-                      <span>{p.icon}</span>
-                      <span>{p.label}</span>
-                    </button>
-                  ))}
+                <div className="mt-4 flex flex-wrap items-start gap-1.5 shrink-0">
+                  {ACADEMIC_STARTERS.map((starter) => {
+                    const isActive = selectedStarter === starter.key;
+                    return (
+                      <button
+                        key={starter.key}
+                        onClick={() => applyStarter(starter)}
+                        className={[
+                          "inline-flex items-center gap-2 rounded-2xl border bg-white/95 px-3 py-2 text-left text-[13px] font-medium text-slate-700 shadow-[0_2px_10px_rgba(15,23,42,0.04)] transition active:scale-[0.99]",
+                          isActive
+                            ? "border-sky-300 bg-sky-50 text-slate-900"
+                            : "border-slate-200/90 hover:border-slate-300 hover:bg-slate-50",
+                        ].join(" ")}
+                      >
+                        <span className="text-[15px] leading-none">{starter.emoji}</span>
+                        <span>{starter.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {hasStarterSuggestions ? (
+                <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0">
+                  <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase">
+                    Suggested prompts
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {starterSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        onClick={() => applySuggestion(suggestion)}
+                        className="w-full text-left rounded-xl border border-transparent px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:border-slate-200/80"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : null}
 
@@ -2484,7 +2915,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                 </div>
               ) : null}
 
-              <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative">
+              <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative max-w-[740px] w-full mx-auto">
                 <button
                   onClick={() => setIsAttachOpen((v) => !v)}
                   className="h-11 w-11 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-sm transition active:scale-[0.98]"
@@ -2605,6 +3036,13 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           ) : null}
         </main>
       </div>
+      {feedbackToast.open ? (
+        <div className="fixed left-1/2 -translate-x-1/2 z-[90] bottom-[calc(82px+env(safe-area-inset-bottom))] md:bottom-5">
+          <div className="rounded-xl border border-slate-200 bg-slate-900 text-white/95 px-4 py-2 text-sm shadow-lg">
+            {feedbackToast.text || "Thank you for your feedback!"}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

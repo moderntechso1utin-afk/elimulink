@@ -46,14 +46,16 @@ function ToolbarButton({ label, onClick, active }) {
   );
 }
 
-export default function NotebookPage({ onBack = null }) {
+export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
   const [isNotesPanelOpen, setIsNotesPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("notes");
   const [theme, setTheme] = useState("classic");
   const [ribbonOpen, setRibbonOpen] = useState(false);
+  const [isNotesOverlayOpen, setIsNotesOverlayOpen] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
 
   const [notes, setNotes] = useState(() => {
-    const saved = localStorage.getItem("elimulink_notebook_notes");
+    const saved = localStorage.getItem("institution_notebook_notes");
     if (saved) return JSON.parse(saved);
     const id = uid();
     return [
@@ -85,6 +87,8 @@ export default function NotebookPage({ onBack = null }) {
 
   const [saving, setSaving] = useState(false);
   const saveTimer = useRef(null);
+  const notesRef = useRef(notes);
+  const searchInputRef = useRef(null);
 
   const selectedNote = useMemo(
     () => notes.find((n) => n.id === selectedId) || notes[0],
@@ -94,7 +98,7 @@ export default function NotebookPage({ onBack = null }) {
   const themeObj = useMemo(() => THEMES.find((t) => t.key === theme) || THEMES[0], [theme]);
 
   useEffect(() => {
-    localStorage.setItem("elimulink_notebook_notes", JSON.stringify(notes));
+    notesRef.current = notes;
   }, [notes]);
 
   useEffect(() => {
@@ -105,10 +109,25 @@ export default function NotebookPage({ onBack = null }) {
     if (selectedId) localStorage.setItem("elimulink_notebook_selected", selectedId);
   }, [selectedId]);
 
+  useEffect(() => {
+    if (!isNotesOverlayOpen) return;
+    const timer = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [isNotesOverlayOpen]);
+
   function scheduleSave() {
     setSaving(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => setSaving(false), 700);
+    saveTimer.current = setTimeout(() => {
+      try {
+        localStorage.setItem("institution_notebook_notes", JSON.stringify(notesRef.current || []));
+      } catch {
+        // no-op
+      }
+      setSaving(false);
+    }, 500);
   }
 
   function createNote() {
@@ -169,12 +188,47 @@ export default function NotebookPage({ onBack = null }) {
     const q = query.trim().toLowerCase();
     const list = [...notes].sort((a, b) => Number(b.pinned) - Number(a.pinned));
     if (!q) return list;
-    return list.filter((n) => (n.title || "").toLowerCase().includes(q));
+    return list.filter((n) => {
+      const title = String(n.title || "").toLowerCase();
+      const content = String(n.content || "").toLowerCase();
+      return title.includes(q) || content.includes(q);
+    });
   }, [notes, query]);
+
+  const mobileNotes = useMemo(() => {
+    return [...filteredNotes].sort(
+      (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    );
+  }, [filteredNotes]);
 
   return (
     <div className={`w-full h-[100dvh] overflow-hidden md:min-h-screen md:h-auto md:overflow-visible ${themeObj.boardBg} flex flex-col`}>
-      <div className="fixed top-0 left-0 right-0 z-50 md:static md:z-auto">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50">
+        <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent backdrop-blur-sm px-3 py-3 flex items-center justify-between">
+          <button
+            className="h-9 w-9 rounded-full border border-slate-200 bg-white/80 shadow-sm flex items-center justify-center"
+            onClick={() => onOpenDrawer?.()}
+            type="button"
+          >
+            ☰
+          </button>
+          <div className="text-sm font-semibold text-slate-900 truncate max-w-[55%]">
+            {selectedNote?.title || "Notebook"}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <button
+              className="h-9 w-9 rounded-full border border-slate-200 bg-white/80 shadow-sm flex items-center justify-center"
+              onClick={() => setIsNotesOverlayOpen(true)}
+              type="button"
+              aria-label="Search notes"
+            >
+              🔍
+            </button>
+            <span className="hidden sm:inline">{saving ? "Saving..." : "Saved"}</span>
+          </div>
+        </div>
+      </div>
+      <div className="hidden md:block">
         <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent backdrop-blur-sm md:backdrop-blur-0 md:bg-white md:border-b md:border-slate-200">
           <div className="w-full px-3 py-3 md:mx-auto md:max-w-7xl md:px-6 md:py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -237,10 +291,10 @@ export default function NotebookPage({ onBack = null }) {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-none touch-pan-y md:overflow-visible">
-        <div className="w-full px-3 pt-20 pb-6 md:mx-auto md:max-w-7xl md:px-6 md:py-6 grid grid-cols-12 gap-6">
+        <div className="w-full px-3 pt-16 md:pt-0 pb-6 md:mx-auto md:max-w-7xl md:px-6 md:py-6 grid grid-cols-12 gap-6">
         <aside
           className={[
-            "col-span-12 md:col-span-4 lg:col-span-3 transition-all",
+            "hidden md:block col-span-12 md:col-span-4 lg:col-span-3 transition-all",
             isNotesPanelOpen ? "" : "md:col-span-1 lg:col-span-1",
           ].join(" ")}
         >
@@ -400,8 +454,18 @@ export default function NotebookPage({ onBack = null }) {
         </aside>
 
         <main className="col-span-12 md:col-span-8 lg:col-span-9">
+          <div className="md:hidden flex items-center justify-between mb-2">
+            <button
+              onClick={() => setIsToolsOpen(true)}
+              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+              type="button"
+            >
+              Tools
+            </button>
+            <span className="text-xs text-slate-500">{saving ? "Saving..." : "Saved"}</span>
+          </div>
           <div className={`rounded-none border-0 shadow-none md:rounded-2xl md:border md:border-slate-200 md:shadow-sm overflow-hidden ${themeObj.editorBg}`}>
-            <div className={`p-4 border-b border-slate-200 bg-slate-50 max-h-[40dvh] overflow-auto md:max-h-none md:overflow-visible ${ribbonOpen ? "" : "hidden"} md:block`}>
+            <div className="hidden md:block p-4 border-b border-slate-200 bg-slate-50 max-h-[40dvh] overflow-auto md:max-h-none md:overflow-visible">
               <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
                 <input
                   className="w-full md:max-w-xl rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
@@ -436,6 +500,104 @@ export default function NotebookPage({ onBack = null }) {
         </main>
       </div>
     </div>
+    {isNotesOverlayOpen ? (
+      <>
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          onClick={() => setIsNotesOverlayOpen(false)}
+          aria-label="Close notes"
+        />
+        <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl bg-white shadow-2xl md:hidden">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-slate-900">Notes</div>
+              <button
+                type="button"
+                onClick={() => setIsNotesOverlayOpen(false)}
+                className="text-xs text-slate-500"
+              >
+                Done
+              </button>
+            </div>
+            <input
+              ref={searchInputRef}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
+              placeholder="Search notes..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <div className="mt-3 max-h-[50vh] overflow-auto space-y-2">
+              <button
+                onClick={createNote}
+                className="w-full text-left px-3 py-2 rounded-xl text-sm font-semibold border border-slate-200 bg-white hover:bg-slate-50"
+                type="button"
+              >
+                + New note
+              </button>
+              {mobileNotes.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => {
+                    setSelectedId(n.id);
+                    setIsNotesOverlayOpen(false);
+                  }}
+                  className={[
+                    "w-full text-left rounded-xl border p-3",
+                    n.id === selectedId
+                      ? "border-sky-300 bg-sky-50"
+                      : "border-slate-200 bg-white hover:bg-slate-50",
+                  ].join(" ")}
+                  type="button"
+                >
+                  <div className="font-semibold text-slate-900 truncate">{n.title || "Untitled"}</div>
+                  <div className="text-xs text-slate-500 mt-1">{prettyTime(n.updatedAt)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </>
+    ) : null}
+    {isToolsOpen ? (
+      <>
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          onClick={() => setIsToolsOpen(false)}
+          aria-label="Close tools"
+        />
+        <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-3xl bg-white shadow-2xl md:hidden">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-slate-900">Tools</div>
+              <button
+                type="button"
+                onClick={() => setIsToolsOpen(false)}
+                className="text-xs text-slate-500"
+              >
+                Done
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                value={selectedNote?.title || ""}
+                onChange={(e) => updateSelected({ title: e.target.value })}
+                placeholder="Note title..."
+              />
+              <div className="flex flex-wrap gap-2">
+                <ToolbarButton label="Bold" onClick={() => alert("Rich text later (TipTap/Quill)")} />
+                <ToolbarButton label="Italic" onClick={() => alert("Rich text later (TipTap/Quill)")} />
+                <ToolbarButton label="Underline" onClick={() => alert("Rich text later (TipTap/Quill)")} />
+                <ToolbarButton label="Insert Image" onClick={() => alert("Upload/insert image (wire later)")} />
+                <ToolbarButton label="Export" onClick={() => alert("Export PDF/DOCX (later)")} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    ) : null}
   </div>
   );
 }

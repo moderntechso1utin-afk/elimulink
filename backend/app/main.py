@@ -53,6 +53,7 @@ default_origins = [
     "http://127.0.0.1:5173",
 ]
 cors_from_env = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+# Always keep safe defaults, then append any explicit env origins.
 allowed_origins = list(dict.fromkeys(default_origins + cors_from_env))
 
 app.add_middleware(
