@@ -1,518 +1,99 @@
-import { useMemo, useState } from "react";
-import {
-  BarChart3,
-  BookOpenCheck,
-  BrainCircuit,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardCheck,
-  FileCheck2,
-  LayoutDashboard,
-  Megaphone,
-  MessageSquareText,
-  Search,
-  Shield,
-  Sparkles,
-  Users,
-  UserCog,
-  Wallet,
-  ScrollText,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Bell, BrainCircuit, CalendarDays, ChevronDown, ClipboardCheck, FileCheck2, LayoutDashboard, LogOut, Megaphone, MessageSquareText, ScrollText, Search, Settings, UserCircle2, UserCog, Users, Wallet } from "lucide-react";
 import { auth } from "../lib/firebase";
 import { apiUrl } from "../lib/apiUrl";
+import NewChatLanding from "./NewChatLanding";
+import { approveWorkflow, attachWorkflowRubric, createWorkflow, evaluateWorkflowDraft, listWorkflows, moveWorkflowToReview, rejectWorkflow, requestWorkflowApproval, resolveWorkflow, saveWorkflowReviewerDecision, setWorkflowCommunication } from "../lib/workflowsApi";
+import { listRubrics } from "../lib/rubricsApi";
 
-const MODULES = [
-  {
-    key: "analytics",
-    label: "Analytics",
-    description: "Performance and enrollment insights.",
-    icon: LayoutDashboard,
-  },
-  {
-    key: "chat",
-    label: "Chat Space",
-    description: "Admin communication channels.",
-    icon: MessageSquareText,
-  },
-  {
-    key: "calendar",
-    label: "Calendar",
-    description: "Academic scheduling control.",
-    icon: CalendarDays,
-  },
-  {
-    key: "subgroups",
-    label: "Subgroups",
-    description: "Manage academic groups.",
-    icon: Users,
-  },
-  {
-    key: "users",
-    label: "User Management",
-    description: "Create users and assign roles.",
-    icon: UserCog,
-  },
-  {
-    key: "courses",
-    label: "Course Management",
-    description: "Add units and assign lecturers.",
-    icon: BookOpenCheck,
-  },
-  {
-    key: "results",
-    label: "Results Management",
-    description: "Upload and approve grades.",
-    icon: FileCheck2,
-  },
-  {
-    key: "attendance",
-    label: "Attendance Monitoring",
-    description: "Track class participation.",
-    icon: ClipboardCheck,
-  },
-  {
-    key: "finance",
-    label: "Financial Overview",
-    description: "Fee tracking and reports.",
-    icon: Wallet,
-  },
-  {
-    key: "announcements",
-    label: "Announcement Control",
-    description: "Broadcast messages to learners.",
-    icon: Megaphone,
-  },
-  {
-    key: "audit",
-    label: "Audit Logs",
-    description: "Activity and action tracking.",
-    icon: ScrollText,
-  },
-  {
-    key: "ai",
-    label: "AI Insights",
-    description: "Ask data-driven questions.",
-    icon: BrainCircuit,
-  },
+const ADMIN_CHAT_GREETING = "Welcome to the ElimuLink Administrative Assistant. You can ask about enrollment, fees, academic results, attendance analytics, or institutional reports.";
+const AI_RULE = "AI suggestions are drafts only. Final grading, approval, publication, and communication unlock require explicit human action.";
+const GROUPS = [
+  { title: "MAIN", items: [["analytics", "Analytics", LayoutDashboard], ["chat", "Chat Space", MessageSquareText]] },
+  { title: "MANAGEMENT", items: [["workflows", "Workflow Center", ClipboardCheck], ["users", "User Management", UserCog], ["courses", "Course Management", FileCheck2], ["announcements", "Announcement Control", Megaphone], ["audit", "Audit Logs", ScrollText]] },
+  { title: "ACADEMIC", items: [["results", "Results Management", FileCheck2], ["attendance", "Attendance Monitoring", ClipboardCheck], ["subgroups", "Subgroup Workspace", Users], ["calendar", "Calendar", CalendarDays]] },
+  { title: "FINANCE", items: [["finance", "Financial Overview", Wallet], ["fees_department", "Fees Department", Wallet]] },
+  { title: "AI & INSIGHTS", items: [["ai", "AI Insights", BrainCircuit], ["academic_results_department", "Academic Results Department", FileCheck2]] },
+  { title: "SYSTEM", items: [["settings", "Settings", Settings], ["profile", "Profile", UserCircle2]] },
 ];
+const KPI = [["Enrollment KPI", "12,542"], ["GPA KPI", "3.52"], ["Attendance KPI", "84%"], ["At-risk Students", "52"]];
+const DEPTS = [{ key: "fees", label: "Fees Department" }, { key: "academic_results", label: "Academic Results Department" }];
+const STATUSES = ["routed", "in_review", "pending_approval", "approved", "rejected", "resolved"];
 
-function SurfaceCard({ title, subtitle, icon: Icon, right, children }) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/60">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {Icon ? (
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                <Icon size={18} />
-              </span>
-            ) : null}
-            <h3 className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">{title}</h3>
-          </div>
-          {subtitle ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
-        </div>
-        {right || null}
-      </header>
-      <div className="p-5">{children}</div>
-    </section>
-  );
-}
-
-function KpiCard({ label, value, hint }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold text-slate-900 dark:text-slate-100">{value}</div>
-      {hint ? <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</div> : null}
-    </div>
-  );
-}
-
-function SideNavButton({ active, icon: Icon, label, description, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "w-full rounded-xl border px-3 py-3 text-left transition",
-        active
-          ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
-          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800",
-      ].join(" ")}
-    >
-      <div className="flex items-start gap-3">
-        <span
-          className={[
-            "mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border",
-            active
-              ? "border-white/30 bg-white/20"
-              : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
-          ].join(" ")}
-        >
-          <Icon size={18} />
-        </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-semibold leading-5">{label}</span>
-          <span className={["mt-0.5 block text-xs", active ? "text-indigo-100" : "text-slate-500 dark:text-slate-400"].join(" ")}>
-            {description}
-          </span>
-        </span>
-      </div>
-    </button>
-  );
-}
-
-function PlaceholderModule({ module }) {
-  return (
-    <div className="space-y-4">
-      <SurfaceCard
-        title={module.label}
-        subtitle={module.description}
-        icon={module.icon}
-        right={
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-            <CheckCircle2 size={14} />
-            Ready For Build
-          </span>
-        }
-      >
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          Frontend module shell is ready. We can now add specific workflows and backend integration for this feature.
-        </div>
-      </SurfaceCard>
-    </div>
-  );
-}
-
-function LineChart({ points }) {
-  const width = 760;
-  const height = 220;
-  const pad = 18;
-  const max = Math.max(...points, 1);
-  const min = Math.min(...points, 0);
-
-  const x = (index) => pad + (index * (width - pad * 2)) / Math.max(points.length - 1, 1);
-  const y = (value) => {
-    const ratio = (value - min) / (max - min || 1);
-    return height - pad - ratio * (height - pad * 2);
-  };
-
-  const path = points
-    .map((value, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(value).toFixed(2)}`)
-    .join(" ");
-
-  const area =
-    `M ${x(0)} ${height - pad} ` +
-    points.map((value, index) => `L ${x(index)} ${y(value)}`).join(" ") +
-    ` L ${x(points.length - 1)} ${height - pad} Z`;
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[220px] w-full">
-      {[...Array(5)].map((_, index) => {
-        const yy = pad + (index * (height - pad * 2)) / 4;
-        return <line key={index} x1={pad} x2={width - pad} y1={yy} y2={yy} stroke="#cbd5e1" strokeWidth="1" />;
-      })}
-      <path d={area} fill="#4f46e5" opacity="0.14" />
-      <path d={path} fill="none" stroke="#4338ca" strokeWidth="3" />
-      {points.map((value, index) => (
-        <circle key={index} cx={x(index)} cy={y(value)} r="4" fill="#4338ca" />
-      ))}
-    </svg>
-  );
-}
+function Card({ title, subtitle, children }) { return <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="mb-3"><div className="text-sm font-semibold">{title}</div><div className="text-xs text-slate-500">{subtitle}</div></div>{children}</section>; }
+function Chip({ value }) { const v = String(value || ""); const c = v === "approved" ? "bg-emerald-100 text-emerald-700" : v === "rejected" ? "bg-rose-100 text-rose-700" : v === "pending_approval" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-700"; return <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${c}`}>{v.replaceAll("_", " ")}</span>; }
 
 export default function AdminAnalyticsLanding({ userRole }) {
   const [active, setActive] = useState("analytics");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [mobileSearch, setMobileSearch] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [department, setDepartment] = useState("fees");
   const [aiInput, setAiInput] = useState("");
-  const [aiMessages, setAiMessages] = useState([
-    {
-      role: "assistant",
-      text: "AI ready. I can analyze student-portal patterns across performance, attendance, fees, and engagement once data sync is available.",
-    },
-  ]);
+  const [aiMessages, setAiMessages] = useState([{ role: "assistant", text: "AI ready. Ask institutional questions." }]);
+  const [workflows, setWorkflows] = useState([]);
+  const [rubrics, setRubrics] = useState([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [newWorkflow, setNewWorkflow] = useState({ workflow_type: "fee_issue", title: "", description: "" });
+  const [selectedRubricId, setSelectedRubricId] = useState("");
+  const [submissionText, setSubmissionText] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [decision, setDecision] = useState({ action: "save_draft", final_score: "", override_notes: "" });
+  const [subgroupTask, setSubgroupTask] = useState({ workflow_type: "assignment_submission", title: "", description: "", subgroup_id: "subgroup-csc-202" });
 
-  const activeModule = MODULES.find((item) => item.key === active) || MODULES[0];
-  const roleLabel = String(userRole || "department_head").replaceAll("_", " ");
+  const role = String(userRole || "institution_admin").toLowerCase();
+  const isLecturer = role.includes("lecturer");
+  const effectiveDept = isLecturer ? "academic_results" : department;
+  const actorId = auth?.currentUser?.uid || "admin-local";
+  const pageTitle = useMemo(() => GROUPS.flatMap((g) => g.items).find((i) => i[0] === active)?.[1] || "Analytics", [active]);
+  const selectedWorkflow = workflows.find((w) => w.id === selectedWorkflowId) || null;
+  const filteredWorkflows = useMemo(() => workflows.filter((w) => (!departmentFilter || w.department === departmentFilter) && (!statusFilter || w.status === statusFilter) && (!search.trim() || `${w.title} ${w.description}`.toLowerCase().includes(search.toLowerCase()))), [workflows, departmentFilter, statusFilter, search]);
+  const subgroupItems = useMemo(() => workflows.filter((w) => ["assignment_submission", "exam_submission"].includes(w.workflow_type)), [workflows]);
 
-  const kpis = useMemo(
-    () => ({
-      enrollment: { value: "12,542", hint: "+515 this semester" },
-      avgGpa: { value: "3.52", hint: "+0.08 compared to last semester" },
-      atRisk: { value: "52", hint: "Students flagged for follow-up" },
-      attendance: { value: "84%", hint: "Average participation this month" },
-    }),
-    []
-  );
+  async function loadWorkflowData() { setError(""); try { const [ws, rs] = await Promise.all([listWorkflows({}), listRubrics({ departmentId: effectiveDept }).catch(() => [])]); setWorkflows(Array.isArray(ws) ? ws : []); setRubrics(Array.isArray(rs) ? rs : []); if (!selectedWorkflowId && ws?.[0]?.id) setSelectedWorkflowId(ws[0].id); } catch (e) { setError(String(e?.message || "Load failed")); } }
+  useEffect(() => { if (["workflows", "subgroups", "fees_department", "academic_results_department"].includes(active)) void loadWorkflowData(); }, [active, effectiveDept]);
 
-  const trendPoints = useMemo(() => [14, 18, 21, 27, 34, 31, 41, 45, 48, 52, 58, 63], []);
+  async function sendAI(prompt) { const clean = String(prompt || "").trim(); if (!clean) return; setAiMessages((m) => [...m, { role: "user", text: clean }]); setAiInput(""); try { const token = await auth?.currentUser?.getIdToken(true).catch(() => null); const res = await fetch(apiUrl("/api/admin/ai"), { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ prompt: clean, department: effectiveDept, role, institutionScope: "university" }) }); const data = await res.json().catch(() => ({})); setAiMessages((m) => [...m, { role: "assistant", text: res.ok ? data?.text || data?.reply || "No response." : `Error (${res.status})` }]); } catch { setAiMessages((m) => [...m, { role: "assistant", text: "Could not reach admin AI endpoint." }]); } }
+  async function createItem(payload) { setBusy(true); setError(""); try { await createWorkflow({ ...payload, created_by: actorId, created_by_role: role }); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Create failed")); } finally { setBusy(false); } }
+  async function act(name) { if (!selectedWorkflow) return; setBusy(true); setError(""); try { const p = { actor_id: actorId, actor_role: role, note: name }; if (name === "review") await moveWorkflowToReview(selectedWorkflow.id, p); if (name === "request_approval") await requestWorkflowApproval(selectedWorkflow.id, p); if (name === "approve") await approveWorkflow(selectedWorkflow.id, p); if (name === "reject") await rejectWorkflow(selectedWorkflow.id, p); if (name === "resolve") await resolveWorkflow(selectedWorkflow.id, p); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Action failed")); } finally { setBusy(false); } }
+  async function toggleComm(unlocked) { if (!selectedWorkflow) return; setBusy(true); setError(""); try { await setWorkflowCommunication(selectedWorkflow.id, { actor_id: actorId, actor_role: role, unlocked, note: unlocked ? "unlock" : "lock" }); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Communication toggle failed")); } finally { setBusy(false); } }
+  async function attachRubric() { if (!selectedWorkflow || !selectedRubricId) return; setBusy(true); setError(""); try { await attachWorkflowRubric(selectedWorkflow.id, { actor_id: actorId, actor_role: role, rubric_id: selectedRubricId, subgroup_id: selectedWorkflow?.metadata?.subgroup_id || "subgroup-csc-202", assessment_type: selectedWorkflow.workflow_type }); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Attach rubric failed")); } finally { setBusy(false); } }
+  async function evalDraft() { if (!selectedWorkflow) return; setBusy(true); setError(""); try { const d = await evaluateWorkflowDraft(selectedWorkflow.id, { actor_id: actorId, actor_role: role, submission_text: submissionText || selectedWorkflow.description || "", submission_id: selectedWorkflow?.metadata?.submission_id || null }); setDraft(d); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Draft evaluation failed")); } finally { setBusy(false); } }
+  async function saveDecision() { if (!selectedWorkflow || !draft) return; setBusy(true); setError(""); try { const marks = {}; const feedback = {}; for (const c of draft.criterion_suggestions || []) { marks[c.criterion_id] = c.suggested_mark_max; feedback[c.criterion_id] = c.draft_feedback; } await saveWorkflowReviewerDecision(selectedWorkflow.id, { actor_id: actorId, actor_role: role, criterion_marks: marks, criterion_feedback: feedback, final_score: decision.final_score === "" ? null : Number(decision.final_score), override_notes: decision.override_notes || null, action: decision.action }); await loadWorkflowData(); } catch (e) { setError(String(e?.message || "Decision save failed")); } finally { setBusy(false); } }
 
-  const riskRows = useMemo(
-    () => [
-      { id: "245678", name: "Alice Njuguna", year: 2, attendance: "42%", gpa: "2.10", risk: "High" },
-      { id: "234759", name: "Tony Kamau", year: 3, attendance: "55%", gpa: "1.90", risk: "High" },
-      { id: "258901", name: "Joy Wanjiku", year: 2, attendance: "58%", gpa: "2.00", risk: "Medium" },
-      { id: "262114", name: "Kevin Otieno", year: 1, attendance: "62%", gpa: "2.30", risk: "Medium" },
-    ],
-    []
-  );
-
-  async function sendAI(prompt) {
-    const clean = String(prompt || "").trim();
-    if (!clean) return;
-
-    setAiMessages((messages) => [...messages, { role: "user", text: clean }]);
-    setAiInput("");
-
-    try {
-      const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
-      if (!token) {
-        setAiMessages((messages) => [
-          ...messages,
-          { role: "assistant", text: "Please sign in to use AI Insights." },
-        ]);
-        return;
-      }
-
-      const response = await fetch(apiUrl("/api/admin/ai"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ prompt: clean }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setAiMessages((messages) => [
-          ...messages,
-          { role: "assistant", text: `Error (${response.status}): ${data?.message || data?.error || "Request failed"}` },
-        ]);
-        return;
-      }
-
-      setAiMessages((messages) => [...messages, { role: "assistant", text: data?.text || data?.reply || "No response." }]);
-    } catch {
-      setAiMessages((messages) => [
-        ...messages,
-        { role: "assistant", text: "Could not reach AI endpoint. Please try again." },
-      ]);
-    }
-  }
-
-  function renderAnalyticsLanding() {
-    return (
-      <div className="space-y-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard label="Enrollment" value={kpis.enrollment.value} hint={kpis.enrollment.hint} />
-          <KpiCard label="Average GPA" value={kpis.avgGpa.value} hint={kpis.avgGpa.hint} />
-          <KpiCard label="At-Risk Learners" value={kpis.atRisk.value} hint={kpis.atRisk.hint} />
-          <KpiCard label="Attendance" value={kpis.attendance.value} hint={kpis.attendance.hint} />
-        </div>
-
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-          <SurfaceCard
-            title="Performance And Enrollment Trend"
-            subtitle="Semester-level progress and academic movement."
-            icon={BarChart3}
-          >
-            <LineChart points={trendPoints} />
-          </SurfaceCard>
-
-          <SurfaceCard
-            title="AI-Aware Context"
-            subtitle="AI chat understands student portal signals while you work."
-            icon={Sparkles}
-          >
-            <div className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-                Live context includes attendance, fees, grades, and course activity for better administrative decisions.
-              </div>
-              <button
-                type="button"
-                onClick={() => setActive("ai")}
-                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-              >
-                <BrainCircuit size={16} />
-                Open AI Insights
-              </button>
-            </div>
-          </SurfaceCard>
-        </div>
-
-        <SurfaceCard
-          title="At-Risk Students Snapshot"
-          subtitle="Flagged learners who need intervention."
-          icon={Shield}
-        >
-          <div className="overflow-auto">
-            <table className="min-w-[680px] w-full text-sm">
-              <thead className="text-slate-500 dark:text-slate-400">
-                <tr className="border-b border-slate-200 dark:border-slate-700 text-left">
-                  <th className="py-2 pr-3 font-semibold">Student ID</th>
-                  <th className="py-2 pr-3 font-semibold">Name</th>
-                  <th className="py-2 pr-3 font-semibold">Year</th>
-                  <th className="py-2 pr-3 font-semibold">Attendance</th>
-                  <th className="py-2 pr-3 font-semibold">GPA</th>
-                  <th className="py-2 pr-3 font-semibold">Risk</th>
-                </tr>
-              </thead>
-              <tbody>
-                {riskRows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300">{row.id}</td>
-                    <td className="py-2.5 pr-3 font-medium text-slate-900 dark:text-slate-100">{row.name}</td>
-                    <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300">{row.year}</td>
-                    <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300">{row.attendance}</td>
-                    <td className="py-2.5 pr-3 text-slate-700 dark:text-slate-300">{row.gpa}</td>
-                    <td className="py-2.5 pr-3">
-                      <span
-                        className={[
-                          "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold",
-                          row.risk === "High"
-                            ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-                        ].join(" ")}
-                      >
-                        {row.risk}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SurfaceCard>
-      </div>
-    );
-  }
-
-  function renderAIInsights() {
-    return (
-      <div className="space-y-5">
-        <SurfaceCard
-          title="AI Insights"
-          subtitle="Ask data-driven questions. AI understands student portal patterns while you use admin tools."
-          icon={BrainCircuit}
-        >
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-[320px] overflow-auto space-y-2 dark:border-slate-700 dark:bg-slate-800">
-                {aiMessages.map((message, index) => (
-                  <div key={index} className="text-sm">
-                    <span className="font-bold text-slate-900 dark:text-slate-100">{message.role === "user" ? "You" : "AI"}:</span>{" "}
-                    <span className="text-slate-700 dark:text-slate-300">{message.text}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <input
-                  value={aiInput}
-                  onChange={(event) => setAiInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") sendAI(aiInput);
-                  }}
-                  placeholder="Ask about performance, attendance, fees, risk patterns..."
-                  className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-indigo-900"
-                />
-                <button
-                  type="button"
-                  onClick={() => sendAI(aiInput)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-                >
-                  <Sparkles size={16} />
-                  Send
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              {[
-                "Show the top departments by attendance risk.",
-                "Which courses have the biggest grade decline this semester?",
-                "Summarize fee arrears impact on performance.",
-                "Recommend interventions for year 1 at-risk learners.",
-              ].map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => sendAI(prompt)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-        </SurfaceCard>
-      </div>
-    );
-  }
-
-  const content =
-    active === "analytics"
-      ? renderAnalyticsLanding()
-      : active === "ai"
-        ? renderAIInsights()
-        : <PlaceholderModule module={activeModule} />;
+  if (active === "chat") return <NewChatLanding userRole={userRole} onOpenAdmin={() => setActive("analytics")} initialAssistantMessage={ADMIN_CHAT_GREETING} />;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
-        <div className="mx-auto max-w-7xl px-4 py-3 md:px-6 md:py-4 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-lg font-bold md:text-2xl">Department Admin</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 capitalize">Role: {roleLabel}</div>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-slate-100 text-slate-900">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto max-w-7xl px-3 py-3 md:px-6 md:py-4"><div className="md:hidden flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-sm font-semibold"><span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">ElimuLink</span><span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">University</span></div><div className="flex items-center gap-2"><button onClick={() => setMobileSearch((v) => !v)} className="h-9 w-9 rounded-full border border-slate-200 bg-white grid place-items-center"><Search size={16} /></button><button className="h-9 w-9 rounded-full border border-slate-200 bg-white grid place-items-center"><Bell size={16} /></button><button onClick={() => setProfileOpen((v) => !v)} className="h-9 w-9 rounded-full border border-slate-200 bg-white grid place-items-center text-xs font-semibold">A</button></div></div>{mobileSearch ? <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="mt-2 md:hidden h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none" /> : null}<div className="hidden md:grid md:grid-cols-[220px_minmax(0,1fr)_220px] md:items-center md:gap-4"><div className="text-lg font-bold">{pageTitle}</div><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search admin modules..." className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none" /></div><div className="justify-self-end flex items-center gap-2"><button className="h-9 w-9 rounded-full border border-slate-200 bg-white grid place-items-center"><Bell size={16} /></button><button onClick={() => setProfileOpen((v) => !v)} className="h-9 w-9 rounded-full border border-slate-200 bg-white grid place-items-center text-xs font-semibold">A</button></div></div>{profileOpen ? <div className="absolute right-3 md:right-6 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"><button onClick={() => { setActive("profile"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Profile</button><button onClick={() => { setActive("settings"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">Settings</button><button onClick={() => { setActive("ai"); setProfileOpen(false); }} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50">AI Preferences</button><button onClick={() => { setProfileOpen(false); window.location.href = "/login?returnTo=%2Finstitution"; }} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 inline-flex items-center gap-2"><LogOut size={14} />Logout</button></div> : null}</div></header>
 
-      <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6 grid grid-cols-12 gap-4 md:gap-6">
-        <aside className="col-span-12 lg:col-span-3 xl:col-span-3">
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Admin Modules</div>
-              <div className="mt-1 text-sm font-bold text-slate-900 dark:text-slate-100">{activeModule.label}</div>
-            </div>
+      <div className="mx-auto grid max-w-7xl grid-cols-12 gap-4 px-3 py-4 md:gap-6 md:px-6 md:py-6">
+        <aside className="col-span-12 lg:col-span-3"><div className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="px-4 py-3 border-b border-slate-200"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Admin Modules</div><div className="mt-1 flex items-center justify-between"><div className="text-sm font-semibold">{pageTitle}</div><button onClick={() => setMobileMenu((v) => !v)} className="lg:hidden inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs">Menu <ChevronDown size={14} className={mobileMenu ? "rotate-180 transition-transform" : "transition-transform"} /></button></div></div><div className="px-3 pt-3"><label className="text-xs text-slate-500">Department workspace</label><select value={effectiveDept} onChange={(e) => setDepartment(e.target.value)} disabled={isLecturer} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:opacity-60">{DEPTS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select></div><nav className={["p-3 space-y-3", mobileMenu ? "block" : "hidden lg:block"].join(" ")}>{GROUPS.map((group) => <div key={group.title} className="space-y-1.5"><div className="px-2 text-[10px] uppercase tracking-wide font-semibold text-slate-400">{group.title}</div>{group.items.map(([key, label, Icon]) => <button key={key} onClick={() => { setActive(key); setMobileMenu(false); }} className={["w-full rounded-xl border px-3 py-2 text-left text-sm transition", active === key ? "border-sky-500 bg-sky-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"].join(" ")}><span className="inline-flex items-center gap-2"><Icon size={15} />{label}</span></button>)}</div>)}</nav></div></aside>
 
-            <div className="p-3 lg:hidden">
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen((open) => !open)}
-                className="w-full inline-flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Search size={14} />
-                  Select Module
-                </span>
-                {mobileMenuOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
-            </div>
+        <main className="col-span-12 lg:col-span-9">
+          {active === "analytics" ? <div className="space-y-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{KPI.map(([l, v]) => <Card key={l} title={l} subtitle=""><div className="text-2xl font-bold">{v}</div></Card>)}</div><Card title="Supervised AI Rule" subtitle="Human-in-the-loop safety"><div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{AI_RULE}</div></Card></div> : null}
+          {active === "ai" ? <Card title="AI Insights" subtitle={`Context: ${JSON.stringify({ role, department: effectiveDept, institution: "university" })}`}><div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{AI_RULE}</div><div className="max-h-[300px] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">{aiMessages.map((m, i) => <div key={i} className="text-sm"><span className="font-semibold">{m.role === "user" ? "You" : "AI"}:</span> {m.text}</div>)}</div><div className="mt-3 flex gap-2"><input value={aiInput} onChange={(e) => setAiInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendAI(aiInput)} placeholder="Ask institutional questions..." className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none" /><button onClick={() => sendAI(aiInput)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">Send</button></div></Card> : null}
 
-            <nav className={["space-y-2 p-3", mobileMenuOpen ? "block" : "hidden lg:block"].join(" ")}>
-              {MODULES.map((module) => (
-                <SideNavButton
-                  key={module.key}
-                  active={active === module.key}
-                  icon={module.icon}
-                  label={module.label}
-                  description={module.description}
-                  onClick={() => {
-                    setActive(module.key);
-                    setMobileMenuOpen(false);
-                  }}
-                />
-              ))}
-            </nav>
-          </div>
-        </aside>
+          {active === "workflows" ? <div className="space-y-4">
+            <Card title="Workflow UI Layer" subtitle="List • Detail • Department filter • Status chips • Approval • Communication • History"><div className="grid grid-cols-1 gap-2 md:grid-cols-4"><select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All departments</option><option value="fees">fees</option><option value="academic_results">academic_results</option></select><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">All statuses</option>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select><button onClick={() => loadWorkflowData()} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">Refresh</button><button disabled={busy} onClick={() => createItem({ ...newWorkflow, metadata: { source: "workflow_ui_layer" } })} className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">Create</button></div><div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3"><select value={newWorkflow.workflow_type} onChange={(e) => setNewWorkflow((p) => ({ ...p, workflow_type: e.target.value }))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="fee_issue">fee_issue</option><option value="missing_marks">missing_marks</option><option value="assignment_submission">assignment_submission</option><option value="exam_submission">exam_submission</option><option value="transcript_request">transcript_request</option><option value="gpa_review">gpa_review</option></select><input value={newWorkflow.title} onChange={(e) => setNewWorkflow((p) => ({ ...p, title: e.target.value }))} placeholder="Workflow title" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><input value={newWorkflow.description} onChange={(e) => setNewWorkflow((p) => ({ ...p, description: e.target.value }))} placeholder="Workflow description" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /></div></Card>
+            {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div> : null}
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-12"><div className="xl:col-span-4"><Card title="Workflow list" subtitle={`${filteredWorkflows.length} items`}><div className="space-y-2 max-h-[520px] overflow-auto">{filteredWorkflows.map((w) => <button key={w.id} onClick={() => { setSelectedWorkflowId(w.id); setDraft(null); setSubmissionText(w.description || ""); }} className={["w-full rounded-xl border px-3 py-2 text-left", selectedWorkflowId === w.id ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"].join(" ")}><div className="text-sm font-semibold truncate">{w.title}</div><div className="mt-1 flex items-center gap-2"><Chip value={w.status} /><span className="text-[11px] text-slate-500">{w.department}</span></div><div className="text-[11px] text-slate-500">{w.workflow_type}</div></button>)}</div></Card></div>
+              <div className="xl:col-span-8"><Card title={selectedWorkflow?.title || "Workflow detail"} subtitle={selectedWorkflow ? `${selectedWorkflow.workflow_type} • ${selectedWorkflow.department}` : "Select workflow"}>{!selectedWorkflow ? <div className="text-sm text-slate-500">Select workflow from list.</div> : <div className="space-y-3"><div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{AI_RULE}</div><div className="grid grid-cols-2 gap-2 md:grid-cols-5"><button onClick={() => act("review")} className="rounded-lg border border-slate-200 px-2 py-2 text-xs">Review</button><button onClick={() => act("request_approval")} className="rounded-lg border border-slate-200 px-2 py-2 text-xs">Request approval</button><button onClick={() => act("approve")} className="rounded-lg border border-slate-200 px-2 py-2 text-xs">Approve</button><button onClick={() => act("reject")} className="rounded-lg border border-slate-200 px-2 py-2 text-xs">Reject</button><button onClick={() => act("resolve")} className="rounded-lg border border-slate-200 px-2 py-2 text-xs">Resolve</button></div><div className="flex flex-wrap items-center gap-2"><button onClick={() => toggleComm(true)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">Unlock communication</button><button onClick={() => toggleComm(false)} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">Lock communication</button><span className="text-xs text-slate-500">Current: {selectedWorkflow.communication_unlocked ? "unlocked" : "locked"}</span></div>
+                    {["assignment_submission", "exam_submission"].includes(selectedWorkflow.workflow_type) ? <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="text-sm font-semibold">Rubric-aware marking assistant</div><div className="grid grid-cols-1 gap-2 md:grid-cols-3"><select value={selectedRubricId} onChange={(e) => setSelectedRubricId(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="">Select rubric</option>{rubrics.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}</select><button onClick={attachRubric} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">Attach rubric</button><button onClick={evalDraft} className="rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white">Generate AI draft</button></div><textarea value={submissionText} onChange={(e) => setSubmissionText(e.target.value)} placeholder="Submission content for draft analysis..." className="min-h-[100px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />{draft ? <div className="space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3"><div className="text-xs font-semibold text-sky-700">AI recommendation • Draft evaluation • Not final mark</div><div className="text-xs text-slate-600">Suggested total range: {draft.total_suggested_min} - {draft.total_suggested_max}</div>{(draft.criterion_suggestions || []).map((c) => <div key={c.criterion_id} className="rounded-lg border border-slate-200 bg-white p-2"><div className="text-sm font-semibold">{c.criterion_title}</div><div className="text-xs text-slate-500">Range: {c.suggested_mark_min} - {c.suggested_mark_max}</div><div className="text-xs text-slate-500">Missing: {c.missing_evidence}</div></div>)}<div className="grid grid-cols-1 gap-2 md:grid-cols-3"><select value={decision.action} onChange={(e) => setDecision((p) => ({ ...p, action: e.target.value }))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="save_draft">save_draft</option><option value="finalize_later">finalize_later</option><option value="approve">approve</option><option value="reject">reject</option><option value="publish">publish</option></select><input value={decision.final_score} onChange={(e) => setDecision((p) => ({ ...p, final_score: e.target.value }))} placeholder="Final score (human)" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><button onClick={saveDecision} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Save human decision</button></div><textarea value={decision.override_notes} onChange={(e) => setDecision((p) => ({ ...p, override_notes: e.target.value }))} placeholder="Override notes..." className="min-h-[70px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" /></div> : null}</div> : null}
+                    <div><div className="text-sm font-semibold mb-1">Workflow history</div><div className="space-y-2 max-h-[180px] overflow-auto">{(selectedWorkflow.history || []).map((h, i) => <div key={`${h.created_at}-${i}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><div className="text-xs font-semibold text-slate-700">{h.action} • {h.actor_role}</div><div className="text-xs text-slate-500">{h.note || "—"}</div></div>)}</div></div></div>}</Card></div></div>
+          </div> : null}
 
-        <main className="col-span-12 lg:col-span-9 xl:col-span-9">{content}</main>
+          {active === "subgroups" ? <div className="space-y-4"><Card title="Subgroup Workspace (Academic)" subtitle="Assignments/exams as controlled workflows"><div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{AI_RULE}</div><div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2"><input value={subgroupTask.title} onChange={(e) => setSubgroupTask((p) => ({ ...p, title: e.target.value }))} placeholder="Task title" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm" /><select value={subgroupTask.workflow_type} onChange={(e) => setSubgroupTask((p) => ({ ...p, workflow_type: e.target.value }))} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"><option value="assignment_submission">assignment_submission</option><option value="exam_submission">exam_submission</option></select><textarea value={subgroupTask.description} onChange={(e) => setSubgroupTask((p) => ({ ...p, description: e.target.value }))} placeholder="Task description" className="md:col-span-2 min-h-[90px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" /><button disabled={busy || !subgroupTask.title || !subgroupTask.description} onClick={() => createItem({ workflow_type: subgroupTask.workflow_type, title: subgroupTask.title, description: subgroupTask.description, metadata: { source: "subgroup_workspace", subgroup_id: subgroupTask.subgroup_id, visibility: "controlled_workspace" } })} className="md:col-span-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">Create subgroup workflow</button></div></Card><Card title="Subgroup tasks & submissions" subtitle={`${subgroupItems.length} workflow item(s)`}><div className="space-y-2">{subgroupItems.map((w) => <div key={w.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2"><div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">{w.title}</div><Chip value={w.status} /></div><div className="mt-1 text-xs text-slate-500">{w.workflow_type} • subgroup: {w?.metadata?.subgroup_id || "n/a"} • comm: {w.communication_unlocked ? "unlocked" : "locked"}</div></div>)}{subgroupItems.length === 0 ? <div className="text-sm text-slate-500">No subgroup workflows yet.</div> : null}</div></Card></div> : null}
+
+          {["users", "courses", "announcements", "audit", "results", "attendance", "calendar", "finance", "profile", "settings", "fees_department", "academic_results_department"].includes(active) ? <Card title={pageTitle} subtitle="Module page"><div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">Module shell is ready.</div></Card> : null}
+        </main>
       </div>
     </div>
   );
 }
+

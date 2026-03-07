@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Header, Request
 from fastapi.exceptions import HTTPException
+from fastapi.responses import StreamingResponse
 
 from ..auth import CurrentUser
 from ..core.dependencies import get_db
@@ -44,6 +47,36 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
             payload.message,
             payload.session_id,
             payload.app_type,
+        )
+
+    stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}
+    if stream_requested:
+        async def event_stream() -> object:
+            # First event confirms stream readiness.
+            yield "event: start\ndata: {\"ok\":true}\n\n"
+            text = str(answer or "")
+            if not text:
+                yield "event: done\ndata: {\"text\":\"\"}\n\n"
+                return
+
+            chunk_size = 40
+            for i in range(0, len(text), chunk_size):
+                chunk = text[i : i + chunk_size]
+                payload_chunk = json.dumps({"delta": chunk}, ensure_ascii=False)
+                yield f"event: chunk\ndata: {payload_chunk}\n\n"
+                await asyncio.sleep(0.01)
+
+            payload_done = json.dumps({"text": text}, ensure_ascii=False)
+            yield f"event: done\ndata: {payload_done}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     return ok_response(

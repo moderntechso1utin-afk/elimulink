@@ -62,6 +62,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "guardrails": "Do not reveal private student data to unauthorized users.",
         "auditAI": True,
     },
+    "communication": {
+        "studentLecturerMessagingEnabled": False,
+    },
     "security": {
         "twoFA": False,
         "sessionTimeoutMinutes": 60,
@@ -111,4 +114,3 @@ def update_section(section: str, patch: dict[str, Any]) -> dict[str, Any]:
     current[section].update(patch or {})
     _write_file(current)
     return current
-

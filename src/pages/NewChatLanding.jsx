@@ -51,7 +51,6 @@ import SubgroupRoom from "./SubgroupRoom";
 import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
-import AdminAnalyticsLanding from "./AdminAnalyticsLanding";
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -154,6 +153,23 @@ const ACADEMIC_STARTERS = [
     ],
   },
 ];
+
+const COMPOSER_TOOL_PRESETS = [
+  { key: "create_image", label: "Create image", prompt: "Create an image concept for this topic..." },
+  { key: "deep_research", label: "Deep research", prompt: "Help me do deep research on this topic..." },
+  { key: "web_search", label: "Web search", prompt: "Find current web sources for this topic..." },
+  { key: "study_learn", label: "Study / Learn", prompt: "Teach me this topic with a clear study plan..." },
+  { key: "quizzes", label: "Quizzes", prompt: "Create a short quiz for this topic..." },
+  { key: "explore_apps", label: "Explore apps", prompt: "Recommend useful academic apps for this task..." },
+];
+
+const EMPTY_ACADEMIC_CONTEXT = Object.freeze({
+  course: "",
+  topic: "",
+  lecture: "",
+  assignment: "",
+  studyMode: "",
+});
 
 function timeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -280,12 +296,127 @@ function resolveSpeechLanguage(languageCode) {
   return "en-US";
 }
 
+function autoResizeTextarea(el, maxHeight = 176) {
+  if (!el) return;
+  el.style.height = "0px";
+  const nextHeight = Math.min(Math.max(el.scrollHeight, 44), maxHeight);
+  el.style.height = `${nextHeight}px`;
+  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
+function detectAcademicContext(message, previousContext = EMPTY_ACADEMIC_CONTEXT) {
+  const raw = String(message || "").trim();
+  const text = raw.toLowerCase();
+  const next = { ...EMPTY_ACADEMIC_CONTEXT, ...previousContext };
+
+  const courseMatch = raw.match(
+    /\b(biology|chemistry|physics|mathematics|math|history|geography|economics|accounting|english|kiswahili|computer science|programming)\b/i
+  );
+  if (courseMatch) next.course = courseMatch[1];
+
+  const topicMatch =
+    raw.match(/\babout\s+([^.!?\n]+)/i) ||
+    raw.match(/\bon\s+([^.!?\n]{4,80})/i) ||
+    raw.match(/\btopic[:\s]+([^.!?\n]+)/i);
+  if (topicMatch?.[1]) next.topic = topicMatch[1].trim();
+
+  const lectureMatch = raw.match(/\blecture(?:\s+about|\s+on)?\s+([^.!?\n]+)/i);
+  if (lectureMatch?.[1]) next.lecture = lectureMatch[1].trim();
+  if (!next.lecture && text.includes("today") && text.includes("lecture")) {
+    next.lecture = "Today's lecture";
+  }
+
+  const assignmentMatch = raw.match(/\bassignment\b[:\s-]*([^.!?\n]+)/i);
+  if (assignmentMatch?.[1]) next.assignment = assignmentMatch[1].trim();
+  if (!next.assignment && /\bassignment|homework|coursework\b/i.test(raw)) {
+    next.assignment = "Current assignment";
+  }
+
+  if (/flashcard|revision card/i.test(raw)) next.studyMode = "flashcards";
+  else if (/note|notes/i.test(raw)) next.studyMode = "notes";
+  else if (/summari[sz]e/i.test(raw)) next.studyMode = "summary";
+  else if (/simplif|explain simpler/i.test(raw)) next.studyMode = "simplify";
+  else if (/quiz|revise|exam/i.test(raw)) next.studyMode = "revision";
+
+  return next;
+}
+
+function mergeAcademicContext(previousContext, detectedContext, message) {
+  const prev = { ...EMPTY_ACADEMIC_CONTEXT, ...(previousContext || {}) };
+  const next = { ...prev, ...(detectedContext || {}) };
+  const text = String(message || "").toLowerCase();
+
+  const explicitReset = /\b(new topic|change topic|switch topic|different subject|start over)\b/.test(text);
+  if (explicitReset) {
+    return { ...EMPTY_ACADEMIC_CONTEXT, ...(detectedContext || {}) };
+  }
+
+  if (
+    prev.course &&
+    next.course &&
+    String(prev.course).toLowerCase() !== String(next.course).toLowerCase()
+  ) {
+    return {
+      ...EMPTY_ACADEMIC_CONTEXT,
+      course: next.course,
+      topic: next.topic,
+      lecture: next.lecture,
+      assignment: next.assignment,
+      studyMode: next.studyMode || prev.studyMode,
+    };
+  }
+
+  return next;
+}
+
+function buildAcademicContextBlock(context) {
+  const ctx = { ...EMPTY_ACADEMIC_CONTEXT, ...(context || {}) };
+  const lines = [];
+  if (ctx.course) lines.push(`Course: ${ctx.course}`);
+  if (ctx.topic) lines.push(`Topic: ${ctx.topic}`);
+  if (ctx.lecture) lines.push(`Lecture: ${ctx.lecture}`);
+  if (ctx.assignment) lines.push(`Assignment: ${ctx.assignment}`);
+  if (ctx.studyMode) lines.push(`Study mode: ${ctx.studyMode}`);
+  if (!lines.length) return "";
+  return `Academic context:\n${lines.join("\n")}`;
+}
+
+function contextLabel(context) {
+  const ctx = { ...EMPTY_ACADEMIC_CONTEXT, ...(context || {}) };
+  const left = ctx.course ? String(ctx.course) : "";
+  const right = ctx.topic ? String(ctx.topic) : "";
+  if (left && right) return `${left} -> ${right}`;
+  return left || right || "";
+}
+
+function startOfDay(value) {
+  const d = new Date(value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function sectionLabelFromTimestamp(timestamp, now = Date.now()) {
+  const ts = Number(timestamp || 0);
+  const date = new Date(ts || now);
+  const nowDate = new Date(now);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((startOfDay(nowDate) - startOfDay(date)) / dayMs);
+
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays <= 7) return "Earlier this week";
+  if (date.getMonth() === nowDate.getMonth() && date.getFullYear() === nowDate.getFullYear()) {
+    return "Earlier this month";
+  }
+  return date.toLocaleDateString([], { month: "short", year: "numeric" });
+}
+
 function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "") {
   return {
     id: makeChatId(),
     title,
     updatedAt: Date.now(),
-    messages: assistantText ? [{ role: "assistant", text: assistantText }] : [],
+    messages: assistantText ? [{ role: "assistant", text: assistantText, createdAt: Date.now() }] : [],
   };
 }
 
@@ -347,6 +478,7 @@ function isErrorText(text) {
 function Bubble({
   role,
   text,
+  streaming = false,
   onAssistantSpeak,
   onRetry,
   onLearnMore,
@@ -362,16 +494,71 @@ function Bubble({
   onRetryMessage,
   onSimplify,
   onDetailed,
+  onSummarizeTool,
+  onNotesTool,
+  onFlashcardsTool,
+  onSimplerTool,
 }) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
   const isActiveSpeak = !isUser && isSpeaking && speakingText === text;
   const [isMoreOpen, setIsMoreOpen] = useState(false);
-  const showActionRow = Boolean(reaction) || isMoreOpen;
-  const assistantParagraphs = String(text || "")
+  const [renderedAssistantText, setRenderedAssistantText] = useState(() =>
+    isUser ? String(text || "") : ""
+  );
+  const [isTypingAnim, setIsTypingAnim] = useState(false);
+  const typingFrameRef = useRef(null);
+  const showActionRow = !streaming && !isTypingAnim && (Boolean(reaction) || isMoreOpen);
+  const assistantParagraphs = String(isUser ? text || "" : renderedAssistantText || "")
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean);
+
+  useEffect(() => {
+    if (isUser) return;
+    const target = String(text || "");
+
+    if (streaming) {
+      setIsTypingAnim(true);
+      setRenderedAssistantText(target);
+      return;
+    }
+
+    if (typingFrameRef.current) {
+      cancelAnimationFrame(typingFrameRef.current);
+      typingFrameRef.current = null;
+    }
+
+    const current = String(renderedAssistantText || "");
+    if (current === target) {
+      setIsTypingAnim(false);
+      return;
+    }
+
+    setIsTypingAnim(true);
+    let i = current && target.startsWith(current) ? current.length : 0;
+    if (i === 0) setRenderedAssistantText("");
+
+    const step = () => {
+      const remaining = target.length - i;
+      const jump = Math.max(2, Math.ceil(remaining / 18));
+      i = Math.min(target.length, i + jump);
+      setRenderedAssistantText(target.slice(0, i));
+      if (i < target.length) {
+        typingFrameRef.current = requestAnimationFrame(step);
+      } else {
+        typingFrameRef.current = null;
+        setIsTypingAnim(false);
+      }
+    };
+    typingFrameRef.current = requestAnimationFrame(step);
+    return () => {
+      if (typingFrameRef.current) {
+        cancelAnimationFrame(typingFrameRef.current);
+        typingFrameRef.current = null;
+      }
+    };
+  }, [isUser, text, streaming]);
 
   function renderAssistantBlock(block, index) {
     const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -399,84 +586,88 @@ function Bubble({
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={[
-          "max-w-[92%] md:max-w-[84%] rounded-2xl px-4 py-3 text-[15px] shadow-sm",
+          "max-w-[92%] md:max-w-[80%] text-[15px]",
           isUser
-            ? "bg-sky-500 text-white rounded-br-md"
-            : "bg-white text-slate-900 border border-slate-200 rounded-bl-md",
+            ? "user-msg-bubble rounded-2xl px-4 py-3 md:px-4.5 md:py-3.5 bg-sky-500 text-white rounded-br-md shadow-sm"
+            : "assistant-msg-surface px-1 py-1 md:py-1.5 text-slate-900",
         ].join(" ")}
       >
         {isUser ? (
           <div className="leading-relaxed">{text}</div>
         ) : (
-          <div className="space-y-3 text-[15px] text-slate-800">
-            {(assistantParagraphs.length ? assistantParagraphs : [String(text || "")]).map((block, idx) =>
-              renderAssistantBlock(block, idx)
+          <div className="space-y-3.5 md:space-y-4 text-[15px] leading-7 md:leading-[1.78] text-slate-800/95">
+            {assistantParagraphs.length ? (
+              assistantParagraphs.map((block, idx) => renderAssistantBlock(block, idx))
+            ) : streaming ? (
+              <div className="inline-flex items-center gap-1.5 text-slate-400">
+                <span className="typing-dot" />
+                <span className="typing-dot typing-dot-delay-1" />
+                <span className="typing-dot typing-dot-delay-2" />
+              </div>
+            ) : (
+              <p className="leading-[1.72]">{String(text || "")}</p>
             )}
+            {streaming || isTypingAnim ? <span className="typing-caret">▌</span> : null}
           </div>
         )}
 
         {!isUser ? (
           <div
             className={[
-              "mt-2.5 flex flex-wrap items-center gap-1.5 transition-opacity",
-              showActionRow ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100",
+              "mt-2.5 md:mt-3 flex items-center gap-0.5 md:gap-1 transition-opacity",
+              showActionRow ? "opacity-100" : "opacity-100 md:opacity-100",
             ].join(" ")}
           >
             <button
               type="button"
               onClick={onCopy}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
               title="Copy response"
             >
-              {isCopied ? <Check size={12} /> : <Copy size={12} />}
-              {isCopied ? "Copied" : "Copy"}
+              {isCopied ? <Check size={14} /> : <Copy size={14} />}
             </button>
             <button
               type="button"
               onClick={onLike}
               className={[
-                "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition",
+                "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md transition",
                 reaction === "like"
-                  ? "border-sky-200 bg-sky-50 text-sky-700"
-                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+                  ? "bg-sky-50/90 text-sky-700"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
               ].join(" ")}
               title="Like"
             >
-              <ThumbsUp size={12} />
-              Like
+              <ThumbsUp size={14} />
             </button>
             <button
               type="button"
               onClick={onDislike}
               className={[
-                "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition",
+                "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md transition",
                 reaction === "dislike"
-                  ? "border-slate-300 bg-slate-200/70 text-slate-700"
-                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100",
+                  ? "bg-slate-200/75 text-slate-700"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
               ].join(" ")}
               title="Dislike"
             >
-              <ThumbsDown size={12} />
-              Dislike
+              <ThumbsDown size={14} />
             </button>
             <button
               type="button"
               onClick={onShare}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
               title="Share"
             >
-              <Share2 size={12} />
-              Share
+              <Share2 size={14} />
             </button>
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setIsMoreOpen((prev) => !prev)}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+                className="assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700"
                 title="More"
               >
-                <Ellipsis size={12} />
-                More
+                <Ellipsis size={14} />
               </button>
               {isMoreOpen ? (
                 <div className="absolute left-0 top-full mt-1.5 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg z-10">
@@ -526,12 +717,54 @@ function Bubble({
             <button
               type="button"
               onClick={() => onAssistantSpeak?.(text)}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+              className={[
+                "assistant-action-btn h-8 w-8 md:h-7 md:w-7 inline-flex items-center justify-center rounded-md",
+                isActiveSpeak
+                  ? "bg-sky-50/90 text-sky-700"
+                  : "text-slate-500/90 hover:bg-slate-100/80 hover:text-slate-700",
+              ].join(" ")}
               title="Play audio"
             >
-              <Volume2 size={13} />
-              {isActiveSpeak ? "Speaking..." : "Speak"}
+              <Volume2 size={14} />
             </button>
+          </div>
+        ) : null}
+
+        {!isUser && !streaming && !isTypingAnim && String(text || "").trim() ? (
+          <div className="mt-2.5 pt-2.5 border-t border-slate-200/70">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onSummarizeTool}
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+              >
+                Summarize this
+              </button>
+              <button
+                type="button"
+                onClick={onNotesTool}
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+              >
+                Turn into notes
+              </button>
+              <button
+                type="button"
+                onClick={onFlashcardsTool}
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+              >
+                Generate flashcards
+              </button>
+              <button
+                type="button"
+                onClick={onSimplerTool}
+                className="rounded-full border border-slate-200/80 bg-slate-50/85 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-100"
+              >
+                Explain simpler
+              </button>
+            </div>
+            <div className="mt-2 text-[11px] text-slate-500">
+              Next step: choose a study action above to continue with this answer.
+            </div>
           </div>
         ) : null}
 
@@ -587,13 +820,17 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
     <button
       onClick={onClick}
       className={[
-        "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
-        collapsed ? "justify-center px-2" : "",
-        active ? "bg-indigo-600 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100",
+        "w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-200",
+        collapsed ? "justify-center px-2.5" : "",
+        active
+          ? "bg-slate-900 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
+          : "text-slate-700 hover:bg-slate-100/90",
       ].join(" ")}
       title={collapsed ? label : undefined}
     >
-      <span className="text-base">{Icon ? <Icon size={16} /> : null}</span>
+      <span className={["text-base", active ? "text-white" : "text-slate-500"].join(" ")}>
+        {Icon ? <Icon size={16} /> : null}
+      </span>
       {!collapsed ? <span className="truncate">{label}</span> : null}
     </button>
   );
@@ -601,13 +838,18 @@ function SidebarButton({ active, label, onClick, collapsed, icon: Icon }) {
 
 function SectionLabel({ collapsed, children }) {
   if (collapsed) return null;
-  return <div className="px-3 pt-2 text-[11px] font-semibold tracking-wider text-slate-500">{children}</div>;
+  return <div className="px-3 pt-2 text-[10px] font-semibold tracking-[0.1em] text-slate-400">{children}</div>;
 }
 
-export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole }) {
+export default function NewChatLanding({
+  onOpenAdmin,
+  userRole: initialUserRole,
+  initialAssistantMessage,
+}) {
   const firebaseUser = auth?.currentUser || null;
   const profileName = resolveProfileName(firebaseUser);
   const welcomeText = buildWelcomeMessage(profileName);
+  const defaultAssistantMessage = String(initialAssistantMessage || "").trim() || welcomeText;
 
   const [active, setActive] = useState("newchat");
   const [userRole, setUserRole] = useState(initialUserRole || null);
@@ -617,9 +859,9 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
       const saved = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
       return Array.isArray(saved) && saved.length > 0
         ? normalizeChatTitles(saved)
-        : [createDefaultChat(UNTITLED_CHAT_BASE, "")];
+        : [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage)];
     } catch {
-      return [createDefaultChat(UNTITLED_CHAT_BASE, "")];
+      return [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage)];
     }
   });
   const [activeChatId, setActiveChatId] = useState(() => {
@@ -633,6 +875,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsMenuOpen, setIsNotificationsMenuOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [sidebarSearch, setSidebarSearch] = useState("");
   const [notifications, setNotifications] = useState(() => [
     {
       id: "n1",
@@ -664,6 +907,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   });
   const [isMorePopupOpen, setIsMorePopupOpen] = useState(false);
   const [isAttachOpen, setIsAttachOpen] = useState(false);
+  const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifAnchor, setNotifAnchor] = useState(null);
@@ -678,10 +922,20 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [feedbackByMessage, setFeedbackByMessage] = useState({});
   const [feedbackToast, setFeedbackToast] = useState({ open: false, text: "" });
+  const [isChatScrolling, setIsChatScrolling] = useState(false);
+  const [chatScrollProgress, setChatScrollProgress] = useState(0);
+  const [chatScrollLabel, setChatScrollLabel] = useState("Today");
+  const [contextByChat, setContextByChat] = useState({});
+  const [mobileScrollTop, setMobileScrollTop] = useState(0);
+  const [desktopScrollTop, setDesktopScrollTop] = useState(0);
+  const [mobileViewportHeight, setMobileViewportHeight] = useState(0);
+  const [desktopViewportHeight, setDesktopViewportHeight] = useState(0);
+  const [virtualizationTick, setVirtualizationTick] = useState(0);
   const [selectedStarter, setSelectedStarter] = useState(null);
   const [starterSuggestions, setStarterSuggestions] = useState([]);
   const recognitionRef = useRef(null);
-  const attachmentMenuRef = useRef(null);
+  const mobileAttachmentMenuRef = useRef(null);
+  const desktopAttachmentMenuRef = useRef(null);
   const newChatMenuRef = useRef(null);
   const profileMenuRef = useRef(null);
   const notificationsMenuRef = useRef(null);
@@ -691,9 +945,15 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   const mobileMessagesRef = useRef(null);
   const desktopMessagesRef = useRef(null);
   const mobileComposerRef = useRef(null);
-  const promptInputRef = useRef(null);
+  const mobilePromptInputRef = useRef(null);
+  const desktopPromptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
   const renderCountRef = useRef(0);
+  const scrollHideTimerRef = useRef(null);
+  const scrollFrameRef = useRef(null);
+  const scrollLabelRef = useRef("Today");
+  const mobileHeightMapRef = useRef(new Map());
+  const desktopHeightMapRef = useRef(new Map());
 
   const [attachments, setAttachments] = useState([]);
   const fileInputRef = useRef(null);
@@ -774,9 +1034,11 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   useEffect(() => {
     if (!isAttachOpen) return;
     const onDocumentMouseDown = (event) => {
-      if (!attachmentMenuRef.current) return;
-      if (!attachmentMenuRef.current.contains(event.target)) {
+      const inMobile = mobileAttachmentMenuRef.current?.contains(event.target);
+      const inDesktop = desktopAttachmentMenuRef.current?.contains(event.target);
+      if (!inMobile && !inDesktop) {
         setIsAttachOpen(false);
+        setIsToolsPanelOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocumentMouseDown);
@@ -897,12 +1159,20 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     });
   });
 
-  const isAdminRole = ["admin", "department_head", "institution_admin"].includes(String(userRole || "").toLowerCase());
-  const canShowAdmin = isAdminRole;
+  const isAdminRole = [
+    "admin",
+    "department_head",
+    "institution_admin",
+    "staff",
+    "departmentadmin",
+    "superadmin",
+  ].includes(String(userRole || "").toLowerCase());
+  const isDevAdminBypass = Boolean(import.meta.env.DEV);
+  const canShowAdmin = isAdminRole || isDevAdminBypass;
   const moreItems = useMemo(() => {
-    if (!isAdminRole) return MORE_ITEMS_BASE;
+    if (!canShowAdmin) return MORE_ITEMS_BASE;
     return [...MORE_ITEMS_BASE, { key: "admin", label: "Admin", icon: Shield }];
-  }, [isAdminRole]);
+  }, [canShowAdmin]);
 
   const moreKeys = useMemo(() => moreItems.map((item) => item.key), [moreItems]);
 
@@ -975,6 +1245,19 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
 
   const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
+  const resolveMessageTimestamp = (message, idx) => {
+    if (message?.createdAt) return Number(message.createdAt);
+    if (activeChat?.updatedAt) return Number(activeChat.updatedAt) + idx;
+    return Date.now() + idx;
+  };
+  const sectionLabelForIndex = (idx) => sectionLabelFromTimestamp(resolveMessageTimestamp(messages[idx], idx));
+  const sectionKeyForIndex = (idx) => {
+    const ts = resolveMessageTimestamp(messages[idx], idx);
+    return `${sectionLabelFromTimestamp(ts)}::${new Date(ts).getFullYear()}-${new Date(ts).getMonth()}`;
+  };
+  const shouldShowSectionAnchor = (idx) => idx === 0 || sectionKeyForIndex(idx) !== sectionKeyForIndex(idx - 1);
+  const activeAcademicContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
+  const activeContextLabel = contextLabel(activeAcademicContext);
   const hasConversation = messages.length > 0;
   const canSend = input.trim().length > 0 || attachments.length > 0;
   const hasText = input.trim().length > 0;
@@ -993,6 +1276,109 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     [notifications]
   );
   const profileInitials = initialsOf(user.name);
+
+  const estimateMessageHeight = (message, mode) => {
+    const text = String(message?.text || "");
+    const charsPerLine = mode === "desktop" ? 90 : 44;
+    const lines = Math.max(1, Math.ceil(text.length / charsPerLine));
+    const base = message?.role === "user" ? 72 : 94;
+    return Math.min(420, base + lines * 20);
+  };
+
+  const getMeasuredOrEstimatedHeight = (index, message, mode) => {
+    const mapRef = mode === "desktop" ? desktopHeightMapRef : mobileHeightMapRef;
+    return mapRef.current.get(index) || estimateMessageHeight(message, mode);
+  };
+
+  const buildVirtualWindow = (mode) => {
+    const viewportHeight = mode === "desktop" ? desktopViewportHeight : mobileViewportHeight;
+    const scrollTop = mode === "desktop" ? desktopScrollTop : mobileScrollTop;
+    const overscan = 8;
+    if (!messages.length) {
+      return { items: [], paddingTop: 0, paddingBottom: 0 };
+    }
+
+    const heights = messages.map((m, idx) => {
+      const base = getMeasuredOrEstimatedHeight(idx, m, mode);
+      const hasSection = idx === 0 || sectionKeyForIndex(idx) !== sectionKeyForIndex(idx - 1);
+      return base + (hasSection ? (mode === "desktop" ? 34 : 30) : 0);
+    });
+    const totalHeight = heights.reduce((sum, h) => sum + h, 0);
+    const targetBottom = scrollTop + Math.max(viewportHeight, 1);
+
+    let offset = 0;
+    let start = 0;
+    while (start < heights.length && offset + heights[start] < scrollTop) {
+      offset += heights[start];
+      start += 1;
+    }
+
+    let end = start;
+    let running = offset;
+    while (end < heights.length && running < targetBottom) {
+      running += heights[end];
+      end += 1;
+    }
+
+    const from = Math.max(0, start - overscan);
+    const to = Math.min(heights.length, end + overscan);
+    const paddingTop = heights.slice(0, from).reduce((sum, h) => sum + h, 0);
+    const renderedHeight = heights.slice(from, to).reduce((sum, h) => sum + h, 0);
+    const paddingBottom = Math.max(0, totalHeight - paddingTop - renderedHeight);
+
+    return {
+      items: messages.slice(from, to).map((message, localIndex) => ({
+        index: from + localIndex,
+        message,
+      })),
+      paddingTop,
+      paddingBottom,
+    };
+  };
+
+  const mobileVirtualWindow = useMemo(
+    () => buildVirtualWindow("mobile"),
+    [messages, mobileScrollTop, mobileViewportHeight, virtualizationTick]
+  );
+
+  const desktopVirtualWindow = useMemo(
+    () => buildVirtualWindow("desktop"),
+    [messages, desktopScrollTop, desktopViewportHeight, virtualizationTick]
+  );
+
+  const getActivePromptInput = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+      return desktopPromptInputRef.current || mobilePromptInputRef.current;
+    }
+    return mobilePromptInputRef.current || desktopPromptInputRef.current;
+  };
+
+  const focusPromptInput = () => {
+    const node = getActivePromptInput();
+    if (!node) return;
+    node.focus();
+    const value = String(node.value || "");
+    if (typeof node.setSelectionRange === "function") {
+      node.setSelectionRange(value.length, value.length);
+    }
+  };
+
+  const resizeComposerInputs = () => {
+    autoResizeTextarea(mobilePromptInputRef.current, 168);
+    autoResizeTextarea(desktopPromptInputRef.current, 192);
+  };
+
+  const handleComposerInputChange = (value, target) => {
+    setInput(value);
+    requestAnimationFrame(() => {
+      if (target) {
+        const maxHeight = Number(target.dataset?.maxheight || 176);
+        autoResizeTextarea(target, Number.isFinite(maxHeight) ? maxHeight : 176);
+      } else {
+        resizeComposerInputs();
+      }
+    });
+  };
 
   const scrollToBottom = (behavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
@@ -1027,10 +1413,52 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   }, []);
 
   useEffect(() => {
+    const id = requestAnimationFrame(() => resizeComposerInputs());
+    return () => cancelAnimationFrame(id);
+  }, [input, attachments.length, kbHeight]);
+
+  useEffect(() => {
+    const syncViewport = () => {
+      setMobileViewportHeight(mobileMessagesRef.current?.clientHeight || 0);
+      setDesktopViewportHeight(desktopMessagesRef.current?.clientHeight || 0);
+    };
+    syncViewport();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(syncViewport);
+    if (mobileMessagesRef.current) observer.observe(mobileMessagesRef.current);
+    if (desktopMessagesRef.current) observer.observe(desktopMessagesRef.current);
+    return () => observer.disconnect();
+  }, [active, kbHeight]);
+
+  useEffect(() => {
     if (!feedbackToast.open) return;
     const id = setTimeout(() => setFeedbackToast({ open: false, text: "" }), 2200);
     return () => clearTimeout(id);
   }, [feedbackToast]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    mobileHeightMapRef.current = new Map();
+    desktopHeightMapRef.current = new Map();
+    setVirtualizationTick((v) => v + 1);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!messages.length) {
+      scrollLabelRef.current = "Today";
+      setChatScrollLabel("Today");
+      return;
+    }
+    const next = sectionLabelForIndex(Math.max(0, messages.length - 1));
+    scrollLabelRef.current = next;
+    setChatScrollLabel(next);
+  }, [messages.length, activeChatId]);
 
   function updateActiveChatMessages(updater, titleHint) {
     const currentId = activeChat?.id;
@@ -1038,7 +1466,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setChats((prev) =>
       prev.map((chat) => {
         if (chat.id !== currentId) return chat;
-        const nextMessages = updater(chat.messages || []);
+        const rawMessages = updater(chat.messages || []);
+        let cursor = Date.now();
+        const nextMessages = (rawMessages || []).map((msg) => {
+          if (msg?.createdAt) {
+            cursor = Math.max(cursor, Number(msg.createdAt));
+            return msg;
+          }
+          cursor += 1;
+          return { ...(msg || {}), createdAt: cursor };
+        });
         const currentTitle = String(chat.title || "").trim();
         const nextTitle =
           isUntitledChatTitle(currentTitle) && titleHint
@@ -1061,6 +1498,10 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setIsMobileDrawerOpen(false);
     setIsMobileMoreOpen(false);
     setIsMorePopupOpen(false);
+    if (typeof onOpenAdmin === "function") {
+      onOpenAdmin();
+      return;
+    }
     syncActiveView("admin", "push");
   }
 
@@ -1113,7 +1554,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
 
     setInput(query);
     setGlobalSearch("");
-    setTimeout(() => promptInputRef.current?.focus(), 0);
+    setTimeout(() => focusPromptInput(), 0);
   }
 
   async function handleLogout() {
@@ -1136,6 +1577,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     const next = createDefaultChat(nextUntitledChatTitle(chats), "");
     setChats((prev) => [next, ...prev]);
     setActiveChatId(next.id);
+    setContextByChat((prev) => ({ ...prev, [next.id]: { ...EMPTY_ACADEMIC_CONTEXT } }));
     syncActiveView("newchat", "push");
     setIsNewChatMenuOpen(false);
   }
@@ -1172,6 +1614,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
 
   function openAttachmentPicker({ accept = "", capture = "", source = "file" } = {}) {
     setIsAttachOpen(false);
+    setIsToolsPanelOpen(false);
     setFileAcceptMode(accept);
     setFileCaptureMode(capture);
     attachmentSourceRef.current = source;
@@ -1209,16 +1652,31 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
+  function toggleAttachmentPanel() {
+    setIsAttachOpen((prev) => {
+      const next = !prev;
+      if (!next) setIsToolsPanelOpen(false);
+      return next;
+    });
+  }
+
+  function applyToolPreset(prompt) {
+    setIsAttachOpen(false);
+    setIsToolsPanelOpen(false);
+    setInput(prompt);
+    requestAnimationFrame(() => focusPromptInput());
+  }
+
   function applyStarter(starter) {
     setSelectedStarter(starter.key);
     setInput(starter.prefill);
     setStarterSuggestions(starter.suggestions);
-    requestAnimationFrame(() => promptInputRef.current?.focus());
+    requestAnimationFrame(() => focusPromptInput());
   }
 
   function applySuggestion(suggestion) {
     setInput(suggestion);
-    requestAnimationFrame(() => promptInputRef.current?.focus());
+    requestAnimationFrame(() => focusPromptInput());
   }
 
   function setMessageFeedback(messageKey, reaction) {
@@ -1228,6 +1686,65 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
       return { ...prev, [messageKey]: next };
     });
     setFeedbackToast({ open: true, text: "Thank you for your feedback!" });
+  }
+
+  function resolveScrollLabelFromPosition(mode, scrollTop) {
+    if (!messages.length) return "Today";
+    const heights = messages.map((m, idx) => {
+      const base = getMeasuredOrEstimatedHeight(idx, m, mode);
+      const hasSection = idx === 0 || sectionKeyForIndex(idx) !== sectionKeyForIndex(idx - 1);
+      return base + (hasSection ? (mode === "desktop" ? 34 : 30) : 0);
+    });
+    let offset = 0;
+    let visibleIdx = 0;
+    while (visibleIdx < heights.length && offset + heights[visibleIdx] < scrollTop + 12) {
+      offset += heights[visibleIdx];
+      visibleIdx += 1;
+    }
+    const bounded = Math.max(0, Math.min(messages.length - 1, visibleIdx));
+    return sectionLabelForIndex(bounded);
+  }
+
+  function measureVirtualRow(mode, index, node) {
+    if (!node) return;
+    const mapRef = mode === "desktop" ? desktopHeightMapRef : mobileHeightMapRef;
+    const nextHeight = Math.ceil(node.getBoundingClientRect().height);
+    if (!nextHeight) return;
+    const prev = mapRef.current.get(index);
+    if (prev === nextHeight) return;
+    mapRef.current.set(index, nextHeight);
+    setVirtualizationTick((v) => v + 1);
+  }
+
+  function handleChatScroll(event) {
+    const el = event.currentTarget;
+    if (!el) return;
+    if (el === mobileMessagesRef.current) {
+      setMobileScrollTop(el.scrollTop);
+      setMobileViewportHeight(el.clientHeight || 0);
+    } else if (el === desktopMessagesRef.current) {
+      setDesktopScrollTop(el.scrollTop);
+      setDesktopViewportHeight(el.clientHeight || 0);
+    }
+    if (isAttachOpen) {
+      setIsAttachOpen(false);
+      setIsToolsPanelOpen(false);
+    }
+    const mode = el === desktopMessagesRef.current ? "desktop" : "mobile";
+    const max = Math.max(1, el.scrollHeight - el.clientHeight);
+    const progress = Math.min(1, Math.max(0, el.scrollTop / max));
+    if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      setChatScrollProgress(progress);
+      const nextLabel = resolveScrollLabelFromPosition(mode, el.scrollTop);
+      if (scrollLabelRef.current !== nextLabel) {
+        scrollLabelRef.current = nextLabel;
+        setChatScrollLabel(nextLabel);
+      }
+    });
+    setIsChatScrolling(true);
+    if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current);
+    scrollHideTimerRef.current = setTimeout(() => setIsChatScrolling(false), 900);
   }
 
   async function shareAssistantMessage(text) {
@@ -1305,6 +1822,166 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     }
   }
 
+  function appendAssistantPlaceholder(streamId) {
+    const now = Date.now();
+    updateActiveChatMessages(
+      (m) => [...m, { role: "assistant", text: "", streaming: true, streamId, createdAt: now }],
+      "Reply"
+    );
+  }
+
+  function updateStreamingAssistant(streamId, updater) {
+    updateActiveChatMessages((m) => {
+      const idx = m.findIndex((item) => item?.streamId === streamId);
+      if (idx < 0) return m;
+      const next = [...m];
+      const current = next[idx];
+      const nextText = updater(String(current?.text || ""));
+      next[idx] = { ...current, text: nextText, streaming: true };
+      return next;
+    }, "Reply");
+  }
+
+  function finalizeStreamingAssistant(streamId, text) {
+    updateActiveChatMessages((m) => {
+      const idx = m.findIndex((item) => item?.streamId === streamId);
+      if (idx < 0) return [...m, { role: "assistant", text, createdAt: Date.now() }];
+      const next = [...m];
+      const current = next[idx] || {};
+      next[idx] = { role: "assistant", text, createdAt: current.createdAt || Date.now() };
+      return next;
+    }, "Reply");
+  }
+
+  function withAcademicContext(messageText, context) {
+    const contextBlock = buildAcademicContextBlock(context);
+    if (!contextBlock) return messageText;
+    return `${messageText}\n\n${contextBlock}`;
+  }
+
+  async function fetchAssistantReplyFull({ token, messageText, academicContext }) {
+    const requestUrl = apiUrl(AI_PATH);
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        message: withAcademicContext(messageText, academicContext),
+        preferredLanguage: String(settingsPrefs?.language || "en-KE"),
+        metadata: { academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT },
+      }),
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (import.meta.env.DEV) {
+      console.debug("[NewChatLanding][AI_RESPONSE]", { status: response.status, ok: response.ok, mode: "fallback" });
+    }
+    if (!response.ok) {
+      const message = result?.message || result?.error || "AI service unavailable.";
+      const backendHealthy = response.status === 404 ? await isBackendHealthy() : true;
+      return {
+        ok: false,
+        text: backendHealthy
+          ? `I couldn't reach the AI service (status ${response.status}). ${message}`
+          : "Backend is unavailable (health check failed). Please try again later.",
+      };
+    }
+
+    return {
+      ok: true,
+      text: result?.text || result?.reply || result?.data?.reply || "Response received.",
+    };
+  }
+
+  async function streamAssistantReply({ token, messageText, streamId, academicContext }) {
+    const requestUrl = `${apiUrl(AI_PATH)}?stream=1`;
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        message: withAcademicContext(messageText, academicContext),
+        preferredLanguage: String(settingsPrefs?.language || "en-KE"),
+        metadata: { academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT },
+      }),
+    });
+
+    const contentType = String(response.headers.get("content-type") || "");
+    if (!response.ok || !response.body || !contentType.includes("text/event-stream")) {
+      return { ok: false, reason: "no_stream" };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let streamedText = "";
+    let gotChunk = false;
+
+    const processEvent = (eventBlock) => {
+      const lines = eventBlock.split("\n");
+      let eventType = "message";
+      const dataLines = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventType = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      const payloadRaw = dataLines.join("\n");
+      if (!payloadRaw) return false;
+      let payload = {};
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch {
+        payload = {};
+      }
+
+      if (eventType === "chunk") {
+        const delta = String(payload?.delta || "");
+        if (delta) {
+          gotChunk = true;
+          streamedText += delta;
+          updateStreamingAssistant(streamId, (prev) => `${prev}${delta}`);
+          requestAnimationFrame(() => scrollToBottom("auto"));
+        }
+      }
+      if (eventType === "done") {
+        const finalText = String(payload?.text || streamedText).trim();
+        finalizeStreamingAssistant(streamId, finalText || streamedText || "Response received.");
+        return true;
+      }
+      return false;
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sepIndex = buffer.search(/\r?\n\r?\n/);
+        while (sepIndex >= 0) {
+          const delimiter = buffer.slice(sepIndex).startsWith("\r\n\r\n") ? 4 : 2;
+          const rawEvent = buffer.slice(0, sepIndex);
+          buffer = buffer.slice(sepIndex + delimiter);
+          const completed = processEvent(rawEvent);
+          if (completed) return { ok: true };
+          sepIndex = buffer.search(/\r?\n\r?\n/);
+        }
+      }
+    } catch {
+      return { ok: false, reason: "stream_read_error", gotChunk, streamedText };
+    }
+
+    if (gotChunk) {
+      finalizeStreamingAssistant(streamId, streamedText || "Response received.");
+      return { ok: true };
+    }
+    return { ok: false, reason: "empty_stream" };
+  }
+
   async function sendMessage(text) {
     const pendingAttachments = attachments;
     const clean = text.trim();
@@ -1314,9 +1991,16 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
       pendingAttachments.length > 0
         ? `\n\nAttachments:\n${pendingAttachments.map((a) => `- ${a.name}`).join("\n")}`
         : "";
+    const messageText = `${clean || "Sent attachments"}${attachSummary}`;
+    const currentContext = contextByChat[activeChat?.id || ""] || EMPTY_ACADEMIC_CONTEXT;
+    const detectedContext = detectAcademicContext(messageText, currentContext);
+    const mergedContext = mergeAcademicContext(currentContext, detectedContext, messageText);
+    if (activeChat?.id) {
+      setContextByChat((prev) => ({ ...prev, [activeChat.id]: mergedContext }));
+    }
 
     updateActiveChatMessages(
-      (m) => [...m, { role: "user", text: (clean || "Sent attachments") + attachSummary }],
+      (m) => [...m, { role: "user", text: messageText }],
       clean || "New Chat"
     );
     if (clean) setLastPrompt(clean);
@@ -1326,6 +2010,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setStarterSuggestions([]);
     requestAnimationFrame(() => scrollToBottom("smooth"));
 
+    let streamId = null;
     try {
       const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
       if (!token) {
@@ -1336,62 +2021,46 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
         return;
       }
 
-      const payloadMessage = clean || "Sent attachments";
-      const requestUrl = apiUrl(AI_PATH);
+      streamId = `stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      appendAssistantPlaceholder(streamId);
+      requestAnimationFrame(() => scrollToBottom("auto"));
+
       if (import.meta.env.DEV) {
-        console.debug("[NewChatLanding][AI_REQUEST]", { url: requestUrl, hasText: Boolean(clean), attachments: pendingAttachments.length });
+        console.debug("[NewChatLanding][AI_REQUEST]", {
+          url: apiUrl(AI_PATH),
+          hasText: Boolean(clean),
+          attachments: pendingAttachments.length,
+          mode: "stream-first",
+        });
       }
-      const response = await fetch(requestUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          message: `${payloadMessage}${attachSummary}`,
-          preferredLanguage: String(settingsPrefs?.language || "en-KE"),
-        }),
+
+      const streamResult = await streamAssistantReply({
+        token,
+        messageText,
+        streamId,
+        academicContext: mergedContext,
       });
+      if (streamResult.ok) return;
 
-      const result = await response.json().catch(() => ({}));
-      if (import.meta.env.DEV) {
-        console.debug("[NewChatLanding][AI_RESPONSE]", { status: response.status, ok: response.ok });
-      }
-      if (!response.ok) {
-        const message = result?.message || result?.error || "AI service unavailable.";
-        const backendHealthy =
-          response.status === 404 ? await isBackendHealthy() : true;
-        updateActiveChatMessages(
-          (m) => [
-            ...m,
-            {
-              role: "assistant",
-              text: backendHealthy
-                ? `I couldn't reach the AI service (status ${response.status}). ${message}`
-                : "Backend is unavailable (health check failed). Please try again later.",
-            },
-          ],
-          clean || "Error"
-        );
-        return;
-      }
-
-      const reply = result?.text || result?.reply || result?.data?.reply || "Response received.";
-      updateActiveChatMessages((m) => [...m, { role: "assistant", text: reply }], clean || "Reply");
+      const fallback = await fetchAssistantReplyFull({
+        token,
+        messageText,
+        academicContext: mergedContext,
+      });
+      finalizeStreamingAssistant(streamId, fallback.text);
     } catch {
       const backendHealthy = await isBackendHealthy();
-      updateActiveChatMessages(
-        (m) => [
-          ...m,
-          {
-            role: "assistant",
-            text: backendHealthy
-              ? "Failed to reach AI service."
-              : "Backend is unavailable (health check failed). Please try again later.",
-          },
-        ],
-        clean || "Request failed"
-      );
+      const errorText = backendHealthy
+        ? "Failed to reach AI service."
+        : "Backend is unavailable (health check failed). Please try again later.";
+      if (streamId) {
+        finalizeStreamingAssistant(streamId, errorText);
+      } else {
+        updateActiveChatMessages(
+          (m) => [...m, { role: "assistant", text: errorText }],
+          clean || "Request failed"
+        );
+      }
     }
   }
 
@@ -1484,7 +2153,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
   function editPromptText(text) {
     const value = String(text || "");
     setInput(value);
-    setTimeout(() => promptInputRef.current?.focus(), 0);
+    setTimeout(() => focusPromptInput(), 0);
   }
 
   function handleNavClick(itemKey) {
@@ -1495,9 +2164,10 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     setIsNotificationsMenuOpen(false);
     setIsMobileDrawerOpen(false);
     setIsAttachOpen(false);
+    setIsToolsPanelOpen(false);
 
     if (itemKey === "admin") {
-      if (!isAdminRole) return;
+      if (!canShowAdmin) return;
       syncActiveView("admin", "push");
       return;
     }
@@ -1621,12 +2291,8 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
     return <ResultsPage />;
   }
 
-  if (active === "admin") {
-    return <AdminAnalyticsLanding userRole={userRole} />;
-  }
-
   return (
-    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-auto md:overflow-visible">
+    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden">
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
         <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto">
           <div className="flex items-center gap-2 min-w-0">
@@ -1828,8 +2494,8 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
         </>
       ) : null}
 
-      <div className="hidden md:block w-full px-3 md:px-4 pt-2 pb-1 shrink-0">
-        <div className="h-12 rounded-xl border border-slate-200 bg-white/95 shadow-sm px-2.5 md:px-3 flex items-center gap-2">
+      <div className="hidden md:block w-full px-4 md:px-5 pt-1.5 pb-0.5 shrink-0 relative z-20">
+        <div className="surface-elevated h-12 rounded-xl border border-slate-200/85 bg-slate-50/95 shadow-[0_6px_16px_rgba(15,23,42,0.05)] px-2.5 md:px-3 flex items-center gap-2">
           <button
             className="md:hidden h-9 w-9 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50"
             onClick={() => setIsMobileDrawerOpen(true)}
@@ -1858,7 +2524,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           </div>
 
           <div className="hidden md:flex flex-1 min-w-0 items-center justify-center">
-            <div className="relative">
+            <div className="relative w-full max-w-[640px]">
               <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 ref={globalSearchInputRef}
@@ -1871,7 +2537,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                   }
                 }}
                 placeholder="Search Ctrl K"
-                className="w-[58vw] min-w-[180px] max-w-[520px] h-9 rounded-full border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                className="w-full h-9 rounded-full border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
               />
             </div>
           </div>
@@ -2319,24 +2985,25 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
         </div>
       ) : null}
 
-      <div className="w-full px-4 md:px-6 pt-3 pb-6 grid grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
+      <div className="w-full px-4 md:px-5 pt-1.5 pb-4 flex-1 min-h-0 overflow-hidden">
+        <div className="h-full min-h-0 md:flex md:gap-4">
         <aside
           className={[
-            "hidden md:block col-span-12 min-h-0",
-            isSidebarOpen ? "md:col-span-3 lg:col-span-3" : "md:col-span-1 lg:col-span-1",
+            "hidden md:block h-full min-h-0 shrink-0 transition-[width] duration-300 ease-out",
+            isSidebarOpen ? "w-[272px]" : "w-[82px]",
           ].join(" ")}
         >
           <div
             className={[
-              "rounded-2xl bg-white border border-slate-200 shadow-sm overflow-visible transition-[width] duration-200 h-full flex flex-col",
-              isSidebarOpen ? "w-full" : "w-[72px]",
+              "surface-elevated rounded-2xl bg-slate-50/90 border border-slate-200/80 shadow-[0_10px_22px_rgba(15,23,42,0.05)] overflow-visible h-full flex flex-col",
+              "transition-all duration-300 ease-out",
             ].join(" ")}
           >
-            <div className="relative px-3 py-3 bg-slate-50 border-b border-slate-200 flex items-center">
+            <div className="relative px-3 py-3 bg-slate-50/95 border-b border-slate-200/70 flex items-center">
               {isSidebarOpen ? (
                 <div className="flex items-center gap-2">
-                  <div className="relative h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.35)]" />
-                  <div className="text-base font-semibold text-slate-800">Home</div>
+                  <div className="relative h-7 w-7 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_20px_rgba(99,102,241,0.22)]" />
+                  <div className="text-[15px] font-semibold text-slate-800">Workspace</div>
                 </div>
               ) : (
                 <div className="h-6 w-6 rounded-lg bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500" />
@@ -2347,19 +3014,35 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                   setIsMorePopupOpen(false);
                 }}
                 className={[
-                  "absolute -right-3 top-1/2 -translate-y-1/2",
-                  "h-9 w-9 rounded-full",
-                  "border border-slate-200 bg-white shadow-sm",
-                  "hover:bg-slate-100 text-slate-700",
+                  "absolute -right-2.5 top-1/2 -translate-y-1/2",
+                  "h-8 w-8 rounded-xl",
+                  "border border-slate-200/90 bg-white/95 shadow-sm",
+                  "hover:bg-slate-100 text-slate-600",
                   "flex items-center justify-center",
                 ].join(" ")}
                 title={isSidebarOpen ? "Collapse" : "Expand"}
               >
-                {isSidebarOpen ? "‹" : "›"}
+                <ChevronRight
+                  size={15}
+                  className={["transition-transform duration-300", isSidebarOpen ? "rotate-180" : ""].join(" ")}
+                />
               </button>
             </div>
 
-            <nav className="p-2 space-y-3 relative flex-1 overflow-y-auto overflow-x-visible smart-scrollbar">
+            <nav className="p-2.5 pb-4 space-y-3 relative flex-1 min-h-0 overflow-y-auto overflow-x-visible smart-scrollbar">
+              {isSidebarOpen ? (
+                <div className="px-2 pb-1">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={sidebarSearch}
+                      onChange={(event) => setSidebarSearch(event.target.value)}
+                      placeholder="Search"
+                      className="h-9 w-full rounded-xl border border-slate-200/90 bg-slate-50/90 pl-9 pr-3 text-[13px] text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                    />
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-1">
                 <SectionLabel collapsed={!isSidebarOpen}>MAIN</SectionLabel>
                 <div className="space-y-1 relative" ref={newChatMenuRef}>
@@ -2558,8 +3241,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
 
         <main
           className={[
-            "col-span-12 min-w-0 flex flex-col overflow-hidden min-h-0",
-            isSidebarOpen ? "md:col-span-9 lg:col-span-9" : "md:col-span-11 lg:col-span-11",
+            "min-w-0 flex flex-col overflow-hidden min-h-0 flex-1",
           ].join(" ")}
         >
           <input
@@ -2576,8 +3258,9 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
             <div className="md:hidden h-[100dvh] overflow-hidden flex flex-col">
               <div
                 ref={mobileMessagesRef}
-                className="flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-3"
-                style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 20px)` }}
+                onScroll={handleChatScroll}
+                className="chat-scroll-surface flex-1 overflow-y-auto overscroll-none touch-pan-y px-4 pt-20 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4"
+                style={{ paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + ${kbHeight}px + 28px)` }}
               >
                 {messages.length === 0 ? (
                   <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)]">
@@ -2614,30 +3297,52 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                   </div>
                 ) : null}
 
-                {messages.map((m, idx) => (
-                  <Bubble
-                    key={idx}
-                    role={m.role}
-                    text={m.text}
-                    onAssistantSpeak={speakAssistantText}
-                    isSpeaking={isSpeaking}
-                    speakingText={speakingText}
-                    onRetry={() => {
-                      if (lastPrompt) sendMessage(lastPrompt);
-                    }}
-                    onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
-                    onCopy={() => copyPromptText(idx, m.text)}
-                    onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
-                    isCopied={copiedMessageIndex === idx}
-                    reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
-                    onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
-                    onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
-                    onShare={() => shareAssistantMessage(m.text)}
-                    onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
-                    onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
-                    onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
-                  />
+                {activeContextLabel ? (
+                  <div className="inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600">
+                    {activeContextLabel}
+                  </div>
+                ) : null}
+
+                {messages.length > 0 ? <div style={{ height: mobileVirtualWindow.paddingTop }} /> : null}
+                {mobileVirtualWindow.items.map(({ message: m, index: idx }) => (
+                  <div key={idx} ref={(node) => measureVirtualRow("mobile", idx, node)}>
+                    {shouldShowSectionAnchor(idx) ? (
+                      <div className="my-2.5 flex items-center gap-2.5">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase">
+                          {sectionLabelForIndex(idx)}
+                        </span>
+                        <span className="h-px flex-1 bg-slate-200/70" />
+                      </div>
+                    ) : null}
+                    <Bubble
+                      role={m.role}
+                      text={m.text}
+                      streaming={Boolean(m.streaming)}
+                      onAssistantSpeak={speakAssistantText}
+                      isSpeaking={isSpeaking}
+                      speakingText={speakingText}
+                      onRetry={() => {
+                        if (lastPrompt) sendMessage(lastPrompt);
+                      }}
+                      onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
+                      onCopy={() => copyPromptText(idx, m.text)}
+                      onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
+                      isCopied={copiedMessageIndex === idx}
+                      reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
+                      onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
+                      onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
+                      onShare={() => shareAssistantMessage(m.text)}
+                      onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
+                      onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
+                      onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
+                      onSummarizeTool={() => sendMessage(`Summarize this answer for me:\n\n${m.text}`)}
+                      onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
+                      onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
+                      onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                    />
+                  </div>
                 ))}
+                {messages.length > 0 ? <div style={{ height: mobileVirtualWindow.paddingBottom }} /> : null}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -2666,116 +3371,162 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                     </div>
                   ) : null}
 
-                  {attachments.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {attachments.map((a) => (
-                        <div
-                          key={a.id}
-                          className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+                  <div className="surface-elevated rounded-[26px] border border-slate-200/90 bg-white/90 backdrop-blur-md px-2.5 py-2 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
+                    {attachments.length > 0 ? (
+                      <div className="mb-2.5 flex flex-wrap gap-1.5 px-1">
+                        {attachments.map((a) => (
+                          <div
+                            key={a.id}
+                            className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-2.5 py-1.5 shadow-[0_2px_10px_rgba(15,23,42,0.04)]"
+                          >
+                            <span className="text-[12px] font-medium text-slate-700 truncate max-w-[130px]">{a.name}</span>
+                            <span className="text-[10px] text-slate-500">{formatFileSize(a.size)}</span>
+                            <button
+                              className="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                              onClick={() => removeAttachment(a.id)}
+                              title="Remove"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-end gap-2">
+                      <div ref={mobileAttachmentMenuRef} className="relative shrink-0">
+                        <button
+                          onClick={toggleAttachmentPanel}
+                          className="h-10 w-10 rounded-2xl border border-slate-200/90 bg-white/80 text-slate-700 grid place-items-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition hover:bg-slate-50 active:scale-[0.98]"
+                          title="Add attachment"
                         >
-                          <span className="text-xs font-medium text-slate-700 truncate max-w-[140px]">{a.name}</span>
-                          <span className="text-[11px] text-slate-500">{formatFileSize(a.size)}</span>
-                          <button
-                            className="text-slate-400 hover:text-slate-700"
-                            onClick={() => removeAttachment(a.id)}
-                            title="Remove"
-                          >
-                            <X size={12} />
-                          </button>
+                          <Plus size={17} />
+                        </button>
+
+                        <div
+                          className={[
+                            "surface-elevated absolute left-0 bottom-12 z-30 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl border border-white/40 bg-white/75 backdrop-blur-xl shadow-[0_18px_40px_rgba(15,23,42,0.16)] p-2 origin-bottom-left transition duration-150",
+                            isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
+                          ].join(" ")}
+                        >
+                          <div className="grid grid-cols-4 gap-1.5">
+                            <button
+                              onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
+                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                            >
+                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                                <Image size={16} />
+                              </span>
+                              <span>Photo</span>
+                            </button>
+                            <button
+                              onClick={() => openAttachmentPicker({ source: "file" })}
+                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                            >
+                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                                <Paperclip size={16} />
+                              </span>
+                              <span>Files</span>
+                            </button>
+                            <button
+                              onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
+                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                            >
+                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                                <Camera size={16} />
+                              </span>
+                              <span>Camera</span>
+                            </button>
+                            <button
+                              onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
+                              className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                            >
+                              <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                                <ScanLine size={16} />
+                              </span>
+                              <span>Scan</span>
+                            </button>
+                          </div>
+
+                          <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5">
+                            <div className="relative overflow-hidden">
+                              <div className={`transition-transform duration-200 ${isToolsPanelOpen ? "-translate-x-full" : "translate-x-0"}`}>
+                                <button
+                                  onClick={() => setIsToolsPanelOpen(true)}
+                                  className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80"
+                                >
+                                  <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Tools</span>
+                                  <ChevronRight size={14} />
+                                </button>
+                              </div>
+                              <div
+                                className={[
+                                  "absolute inset-0 transition-transform duration-200",
+                                  isToolsPanelOpen ? "translate-x-0" : "translate-x-full",
+                                ].join(" ")}
+                              >
+                                <div className="rounded-lg bg-white/90 p-1">
+                                  <button
+                                    onClick={() => setIsToolsPanelOpen(false)}
+                                    className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100"
+                                  >
+                                    <ChevronDown size={12} />
+                                    Back
+                                  </button>
+                                  <div className="grid grid-cols-2 gap-1">
+                                    {COMPOSER_TOOL_PRESETS.map((tool) => (
+                                      <button
+                                        key={tool.key}
+                                        onClick={() => applyToolPreset(tool.prompt)}
+                                        className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50"
+                                      >
+                                        {tool.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
+                      </div>
 
-                  <div className="flex items-end gap-2">
-                    <div ref={attachmentMenuRef} className="relative">
-                      <button
-                        onClick={() => setIsAttachOpen((v) => !v)}
-                        className="h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-700 grid place-items-center shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
-                        title="Add attachment"
-                      >
-                        <Plus size={18} />
-                      </button>
-
-                      {isAttachOpen ? (
-                        <div className="fixed inset-x-0 bottom-0 z-30 rounded-t-2xl bg-white shadow-xl ring-1 ring-black/5 p-2 divide-y divide-slate-100">
-                          <button
-                            onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
-                          >
-                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                              <Image size={18} />
-                            </span>
-                            <span>Photo</span>
-                          </button>
-                          <button
-                            onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
-                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
-                          >
-                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                              <Camera size={18} />
-                            </span>
-                            <span>Camera</span>
-                          </button>
-                          <button
-                            onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
-                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
-                          >
-                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                              <ScanLine size={18} />
-                            </span>
-                            <span>Scan</span>
-                          </button>
-                          <button
-                            onClick={() => openAttachmentPicker({ source: "file" })}
-                            className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
-                          >
-                            <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                              <Paperclip size={18} />
-                            </span>
-                            <span>File</span>
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-2">
                       <textarea
-                        ref={promptInputRef}
+                        ref={mobilePromptInputRef}
+                        data-maxheight="168"
                         rows={1}
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={(e) => handleComposerInputChange(e.target.value, e.target)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.shiftKey) {
                             e.preventDefault();
                             sendMessage(input);
                           }
                         }}
-                        className="w-full resize-none outline-none text-sm text-slate-800 placeholder:text-slate-400"
+                        className="min-h-[42px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
                         placeholder="Type your message..."
                       />
-                    </div>
 
-                    <button
-                      onClick={() => (hasText ? sendMessage(input) : toggleMic())}
-                      className={[
-                        "relative h-11 w-11 rounded-xl transition grid place-items-center overflow-hidden",
-                        hasText
-                          ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
-                          : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-                      ].join(" ")}
-                      title={hasText ? "Send" : "Live AI ready"}
-                    >
-                      {!hasText ? (
-                        <>
-                          <span className="absolute inset-0 rounded-xl border-2 border-sky-300/60 animate-ping" />
-                          <span className="absolute inset-0 rounded-xl border border-sky-400/40" />
-                          <Mic size={16} className="relative z-10" />
-                        </>
-                      ) : (
-                        <Send size={16} className="transition-transform duration-200" />
-                      )}
-                    </button>
+                      <button
+                        onClick={() => (hasText ? sendMessage(input) : toggleMic())}
+                        className={[
+                          "relative h-10 w-10 shrink-0 rounded-2xl transition grid place-items-center overflow-hidden",
+                          hasText
+                            ? "bg-sky-500 text-white shadow-sm hover:bg-sky-600 active:scale-[0.98]"
+                            : "border border-slate-200 bg-white/90 text-slate-700 hover:bg-slate-50",
+                        ].join(" ")}
+                        title={hasText ? "Send" : "Live AI ready"}
+                      >
+                        {!hasText ? (
+                          <>
+                            <span className="absolute inset-0 rounded-2xl border border-sky-400/35" />
+                            <Mic size={16} className="relative z-10" />
+                          </>
+                        ) : (
+                          <Send size={16} className="transition-transform duration-200" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2792,15 +3543,23 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           ) : null}
 
           {active === "newchat" ? (
-            <div className="hidden md:flex rounded-xl bg-slate-50 border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
-            <div className="px-5 py-3 border-b border-slate-200 bg-white/80 shrink-0">
-              <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
-              <div className="text-xs text-slate-500">
-                AI Academic Assistant • {formatChatStamp(activeChat?.updatedAt)}
+            <div className="surface-elevated relative hidden md:flex flex-1 min-h-0 flex-col rounded-2xl bg-slate-50/70">
+            <div className="px-4 py-2.5 shrink-0">
+              <div className="max-w-[1080px] w-full mx-auto">
+                <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
+                <div className="text-xs text-slate-500">
+                  AI Academic Assistant • {formatChatStamp(activeChat?.updatedAt)}
+                </div>
+                {activeContextLabel ? (
+                  <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600">
+                    {activeContextLabel}
+                  </div>
+                ) : null}
               </div>
             </div>
 
-            <div className={[hasConversation ? "px-4 pt-3 pb-4" : "p-4", "flex-1 min-h-0 flex flex-col bg-slate-100/60"].join(" ")}>
+            <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-1 pb-2", "flex-1 min-h-0 flex flex-col"].join(" ")}>
+              <div className="max-w-[1080px] w-full mx-auto flex-1 min-h-0 flex flex-col">
               {messages.length === 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
@@ -2810,8 +3569,8 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                 </div>
               ) : null}
 
-              <div ref={desktopMessagesRef} className="flex-1 min-h-0 overflow-y-auto smart-scrollbar rounded-2xl bg-slate-100/80 border border-slate-300/70 px-5 py-4 space-y-3">
-                <div className="max-w-[740px] w-full mx-auto space-y-3 pb-5">
+              <div ref={desktopMessagesRef} onScroll={handleChatScroll} className="chat-scroll-surface flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5">
+                <div className="max-w-[760px] w-full mx-auto space-y-5 pb-8">
                 {messages.length === 0 ? (
                   <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
@@ -2824,36 +3583,52 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                   </div>
                 ) : null}
 
-                {messages.map((m, idx) => (
-                  <Bubble
-                    key={idx}
-                    role={m.role}
-                    text={m.text}
-                    onAssistantSpeak={speakAssistantText}
-                    isSpeaking={isSpeaking}
-                    speakingText={speakingText}
-                    onRetry={() => {
-                      if (lastPrompt) sendMessage(lastPrompt);
-                    }}
-                    onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
-                    onCopy={() => copyPromptText(idx, m.text)}
-                    onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
-                    isCopied={copiedMessageIndex === idx}
-                    reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
-                    onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
-                    onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
-                    onShare={() => shareAssistantMessage(m.text)}
-                    onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
-                    onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
-                    onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
-                  />
+                {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingTop }} /> : null}
+                {desktopVirtualWindow.items.map(({ message: m, index: idx }) => (
+                  <div key={idx} ref={(node) => measureVirtualRow("desktop", idx, node)}>
+                    {shouldShowSectionAnchor(idx) ? (
+                      <div className="my-3 flex items-center gap-3">
+                        <span className="text-[10px] font-semibold tracking-[0.08em] text-slate-400 uppercase">
+                          {sectionLabelForIndex(idx)}
+                        </span>
+                        <span className="h-px flex-1 bg-slate-200/70" />
+                      </div>
+                    ) : null}
+                    <Bubble
+                      role={m.role}
+                      text={m.text}
+                      streaming={Boolean(m.streaming)}
+                      onAssistantSpeak={speakAssistantText}
+                      isSpeaking={isSpeaking}
+                      speakingText={speakingText}
+                      onRetry={() => {
+                        if (lastPrompt) sendMessage(lastPrompt);
+                      }}
+                      onLearnMore={() => sendMessage("Learn more about the error and how I can fix it.")}
+                      onCopy={() => copyPromptText(idx, m.text)}
+                      onEdit={m.role === "user" ? () => editPromptText(m.text) : undefined}
+                      isCopied={copiedMessageIndex === idx}
+                      reaction={feedbackByMessage[`${activeChat?.id || "chat"}:${idx}`] || null}
+                      onLike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "like")}
+                      onDislike={() => setMessageFeedback(`${activeChat?.id || "chat"}:${idx}`, "dislike")}
+                      onShare={() => shareAssistantMessage(m.text)}
+                      onRetryMessage={() => lastPrompt && sendMessage(lastPrompt)}
+                      onSimplify={() => sendMessage("Please simplify your last answer in clear student-friendly language.")}
+                      onDetailed={() => sendMessage("Please make your last answer more detailed with steps and practical examples.")}
+                      onSummarizeTool={() => sendMessage(`Summarize this answer for me:\n\n${m.text}`)}
+                      onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
+                      onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
+                      onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                    />
+                  </div>
                 ))}
+                {messages.length > 0 ? <div style={{ height: desktopVirtualWindow.paddingBottom }} /> : null}
                 <div ref={messagesEndRef} />
                 </div>
               </div>
 
               {messages.length === 0 ? (
-                <div className="mt-4 flex flex-wrap items-start gap-1.5 shrink-0">
+                <div className="mt-3 flex flex-wrap items-start gap-1.5 shrink-0 max-w-[760px] w-full mx-auto">
                   {ACADEMIC_STARTERS.map((starter) => {
                     const isActive = selectedStarter === starter.key;
                     return (
@@ -2876,7 +3651,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
               ) : null}
 
               {hasStarterSuggestions ? (
-                <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0">
+                <div className="surface-elevated mt-3 rounded-2xl border border-slate-200/80 bg-white/95 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.05)] shrink-0 max-w-[760px] w-full mx-auto">
                   <div className="px-2 pb-1.5 text-[10px] font-semibold tracking-[0.08em] text-slate-500 uppercase">
                     Suggested prompts
                   </div>
@@ -2894,138 +3669,192 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
                 </div>
               ) : null}
 
-              {attachments.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2 shrink-0">
-                  {attachments.map((a) => (
-                    <div
-                      key={a.id}
-                      className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
-                    >
-                      <span className="text-xs font-medium text-slate-700 truncate max-w-[180px]">{a.name}</span>
-                      <span className="text-[11px] text-slate-500">{formatFileSize(a.size)}</span>
-                      <button
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => removeAttachment(a.id)}
-                        title="Remove"
-                      >
-                        <X size={12} />
-                      </button>
+              <div ref={desktopAttachmentMenuRef} className="mt-3 shrink-0 relative max-w-[760px] w-full mx-auto border-t border-slate-200/70 pt-4 pb-1">
+                <div className="surface-elevated rounded-[28px] border border-slate-200/85 bg-white/95 backdrop-blur-md px-3 py-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition focus-within:border-sky-300/70 focus-within:ring-2 focus-within:ring-sky-100/80">
+                  {attachments.length > 0 ? (
+                    <div className="mb-2.5 flex flex-wrap gap-1.5">
+                      {attachments.map((a) => (
+                        <div
+                          key={a.id}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-2.5 py-1.5"
+                        >
+                          <span className="text-[12px] font-medium text-slate-700 truncate max-w-[220px]">{a.name}</span>
+                          <span className="text-[10px] text-slate-500">{formatFileSize(a.size)}</span>
+                          <button
+                            className="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            onClick={() => removeAttachment(a.id)}
+                            title="Remove"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
+
+                  <div className="flex items-end gap-2">
+                    <button
+                      onClick={toggleAttachmentPanel}
+                      className="h-10 w-10 shrink-0 rounded-2xl border border-slate-200/90 bg-white/80 hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-[0_6px_16px_rgba(15,23,42,0.08)] transition active:scale-[0.98]"
+                      title="Add attachment"
+                    >
+                      <Plus size={17} />
+                    </button>
+
+                    <textarea
+                      ref={desktopPromptInputRef}
+                      data-maxheight="192"
+                      rows={1}
+                      value={input}
+                      onChange={(e) => handleComposerInputChange(e.target.value, e.target)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage(input);
+                        }
+                      }}
+                      className="min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400"
+                      placeholder="Type your message..."
+                    />
+
+                    <button
+                      onClick={() => setIsAiModeOn((v) => !v)}
+                      className={[
+                        "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
+                        isAiModeOn
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                      ].join(" ")}
+                      title="AI conversation mode"
+                    >
+                      <span className="inline-flex items-center gap-1"><Sparkles size={14} /> AI</span>
+                    </button>
+
+                    <button
+                      onClick={toggleMic}
+                      className={[
+                        "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
+                        isListening
+                          ? "border-red-500 bg-red-500 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+                      ].join(" ")}
+                      title={isListening ? "Stop voice input" : "Start voice input"}
+                    >
+                      {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    </button>
+
+                    <button
+                      onClick={() => canSend && sendMessage(input)}
+                      disabled={!canSend}
+                      className={[
+                        "h-10 w-10 rounded-xl text-white shadow-sm transition",
+                        canSend ? "bg-sky-500 hover:bg-sky-600 active:scale-[0.98]" : "bg-slate-300 cursor-not-allowed",
+                      ].join(" ")}
+                      title="Send"
+                    >
+                      <Send size={16} className="mx-auto" />
+                    </button>
+                  </div>
                 </div>
-              ) : null}
 
-              <div ref={attachmentMenuRef} className="mt-3 flex items-end gap-2 shrink-0 relative max-w-[740px] w-full mx-auto">
-                <button
-                  onClick={() => setIsAttachOpen((v) => !v)}
-                  className="h-11 w-11 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 inline-flex items-center justify-center shadow-sm transition active:scale-[0.98]"
-                  title="Add attachment"
+                <div
+                  className={[
+                    "surface-elevated absolute left-2 bottom-[calc(100%+10px)] z-20 w-72 rounded-2xl border border-white/45 bg-white/72 backdrop-blur-xl shadow-[0_20px_42px_rgba(15,23,42,0.18)] p-2 origin-bottom-left transition duration-150",
+                    isAttachOpen ? "opacity-100 translate-y-0 scale-100 pointer-events-auto" : "opacity-0 translate-y-1.5 scale-95 pointer-events-none",
+                  ].join(" ")}
                 >
-                  <Plus size={17} />
-                </button>
-
-                {isAttachOpen ? (
-                  <div className="absolute left-0 bottom-12 z-20 rounded-xl bg-white shadow-xl ring-1 ring-black/5 p-2 w-56 divide-y divide-slate-100">
+                  <div className="grid grid-cols-4 gap-1.5">
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", source: "photo" })}
-                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
                     >
-                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                        <Image size={18} />
+                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                        <Image size={16} />
                       </span>
                       <span>Photo</span>
                     </button>
                     <button
-                      onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
-                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                      onClick={() => openAttachmentPicker({ source: "file" })}
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
                     >
-                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                        <Camera size={18} />
+                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                        <Paperclip size={16} />
+                      </span>
+                      <span>Files</span>
+                    </button>
+                    <button
+                      onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "camera" })}
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
+                    >
+                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                        <Camera size={16} />
                       </span>
                       <span>Camera</span>
                     </button>
                     <button
                       onClick={() => openAttachmentPicker({ accept: "image/*", capture: "environment", source: "scan" })}
-                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
+                      className="group rounded-xl border border-slate-200/70 bg-white/75 px-1.5 py-2 text-center text-[10px] font-medium text-slate-600 hover:border-slate-300 hover:bg-white"
                     >
-                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                        <ScanLine size={18} />
+                      <span className="mx-auto mb-1 inline-flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                        <ScanLine size={16} />
                       </span>
                       <span>Scan</span>
                     </button>
-                    <button
-                      onClick={() => openAttachmentPicker({ source: "file" })}
-                      className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 active:scale-[0.99] flex items-center gap-3"
-                    >
-                      <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600">
-                        <Paperclip size={18} />
-                      </span>
-                      <span>File</span>
-                    </button>
                   </div>
-                ) : null}
 
-                <div className="flex-1 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100">
-                  <input
-                    ref={promptInputRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") sendMessage(input);
-                    }}
-                    className="w-full outline-none text-[15px] text-slate-800 bg-transparent placeholder:text-slate-400"
-                    placeholder="Type your message..."
-                  />
-
-                  <button
-                    onClick={() => setIsAiModeOn((v) => !v)}
-                    className={[
-                      "h-9 px-3.5 rounded-xl border text-xs font-semibold transition",
-                      isAiModeOn
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
-                    ].join(" ")}
-                    title="AI conversation mode"
-                  >
-                    <span className="inline-flex items-center gap-1"><Sparkles size={14} /> AI</span>
-                  </button>
-
-                  <button
-                    onClick={toggleMic}
-                    className={[
-                      "h-9 w-9 rounded-xl border inline-flex items-center justify-center transition",
-                      isListening
-                        ? "border-red-500 bg-red-500 text-white"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
-                    ].join(" ")}
-                    title={isListening ? "Stop voice input" : "Start voice input"}
-                  >
-                    {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-                  </button>
-
-                  <button
-                    onClick={() => canSend && sendMessage(input)}
-                    disabled={!canSend}
-                    className={[
-                      "h-10 w-10 rounded-xl text-white shadow-sm transition",
-                      canSend ? "bg-sky-500 hover:bg-sky-600 active:scale-[0.98]" : "bg-slate-300 cursor-not-allowed",
-                    ].join(" ")}
-                    title="Send"
-                  >
-                    <Send size={16} className="mx-auto" />
-                  </button>
+                  <div className="mt-2 rounded-xl border border-slate-200/70 bg-white/65 p-1.5">
+                    <div className="relative overflow-hidden">
+                      <div className={`transition-transform duration-200 ${isToolsPanelOpen ? "-translate-x-full" : "translate-x-0"}`}>
+                        <button
+                          onClick={() => setIsToolsPanelOpen(true)}
+                          className="w-full flex items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-slate-700 hover:bg-white/80"
+                        >
+                          <span className="inline-flex items-center gap-1.5"><Sparkles size={14} /> Tools</span>
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                      <div
+                        className={[
+                          "absolute inset-0 transition-transform duration-200",
+                          isToolsPanelOpen ? "translate-x-0" : "translate-x-full",
+                        ].join(" ")}
+                      >
+                        <div className="rounded-lg bg-white/90 p-1">
+                          <button
+                            onClick={() => setIsToolsPanelOpen(false)}
+                            className="mb-1 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-slate-500 hover:bg-slate-100"
+                          >
+                            <ChevronDown size={12} />
+                            Back
+                          </button>
+                          <div className="grid grid-cols-2 gap-1">
+                            {COMPOSER_TOOL_PRESETS.map((tool) => (
+                              <button
+                                key={tool.key}
+                                onClick={() => applyToolPreset(tool.prompt)}
+                                className="rounded-md border border-slate-200/80 bg-white px-2 py-1.5 text-left text-[11px] text-slate-700 hover:bg-slate-50"
+                              >
+                                {tool.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+              </div>
               </div>
             </div>
 
-            <div className="mt-3 text-xs text-slate-500">
+            <div className="mt-3 text-xs text-slate-500 hidden">
               Backend will be Python. Later we will send messages and attachments to your API (for example /api/chat).
             </div>
             </div>
           ) : null}
 
           {active !== "newchat" ? (
-            <div className="hidden md:flex flex-1 min-h-0 rounded-xl bg-slate-50 border border-slate-200 shadow-sm p-6">
+            <div className="hidden md:flex flex-1 min-h-0 rounded-2xl bg-slate-50/80 border border-slate-200/80 shadow-[0_10px_24px_rgba(15,23,42,0.05)] p-6">
               <div className="w-full max-w-2xl">
                 <PlaceholderPanel
                   title={activePlaceholder?.title || "Coming soon"}
@@ -3036,6 +3865,7 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           ) : null}
         </main>
       </div>
+      </div>
       {feedbackToast.open ? (
         <div className="fixed left-1/2 -translate-x-1/2 z-[90] bottom-[calc(82px+env(safe-area-inset-bottom))] md:bottom-5">
           <div className="rounded-xl border border-slate-200 bg-slate-900 text-white/95 px-4 py-2 text-sm shadow-lg">
@@ -3043,6 +3873,22 @@ export default function NewChatLanding({ onOpenAdmin, userRole: initialUserRole 
           </div>
         </div>
       ) : null}
+      <div
+        className={[
+          "pointer-events-none fixed right-3 md:right-3 top-[40%] z-[70] transition-all duration-300",
+          isChatScrolling ? "opacity-100 translate-x-0" : "opacity-0 translate-x-1.5",
+        ].join(" ")}
+      >
+        <div className="mb-2 -ml-16 w-20 rounded-full border border-slate-200/70 bg-white/90 px-2.5 py-1 text-[11px] text-slate-600 text-center shadow-[0_6px_18px_rgba(15,23,42,0.08)] backdrop-blur-sm md:text-xs">
+          {chatScrollLabel}
+        </div>
+        <div className="relative h-20 md:h-24 w-[3px] md:w-1 rounded-full bg-slate-400/25 overflow-hidden backdrop-blur-sm">
+          <div
+            className="absolute left-0 right-0 h-7 md:h-8 rounded-full bg-slate-500/55"
+            style={{ top: `${chatScrollProgress * 100}%`, transform: "translateY(-50%)" }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -16,6 +16,7 @@ from ..utils import (
     require_department,
     require_institution,
 )
+from ..services.institution_graph import build_institution_graph, resolve_graph_context
 from .chat import call_gemini_text
 
 
@@ -81,6 +82,20 @@ async def student_ai(request: Request, user: CurrentUser = Depends(get_current_u
         "userName": (body or {}).get("userName"),
         "profileName": profile.get("fullName") or profile.get("name"),
     }
+
+    graph = build_institution_graph(
+        institution_id=scoped_institution,
+        actor_id=user.uid,
+        actor_role=user.role,
+        actor_department_id=scoped_department,
+    )
+    graph_context = resolve_graph_context(
+        graph=graph,
+        actor_role=user.role,
+        question=message,
+        explicit_department=scoped_department if scoped_department in {"fees", "academic_results"} else None,
+    )
+    context["graphContext"] = graph_context
 
     print(
         f"[AI_DEBUG] rid={getattr(request.state, 'request_id', None)} "
