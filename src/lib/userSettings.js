@@ -1,3 +1,6 @@
+import { auth } from "./firebase";
+import { readScopedJson, writeScopedJson } from "./userScopedStorage";
+
 export const PROFILE_SETTINGS_KEY = "elimulink_profile_settings_v1";
 export const PREFS_SETTINGS_KEY = "elimulink_preferences_v1";
 export const DEFAULT_APP_LANGUAGE = "en";
@@ -23,30 +26,50 @@ function writeJSON(key, value) {
   }
 }
 
-export function getStoredProfile(defaults = {}) {
-  const stored = readJSON(PROFILE_SETTINGS_KEY, {});
+function resolveUid(uid) {
+  if (uid) return uid;
+  return auth?.currentUser?.uid || null;
+}
+
+export function getStoredProfile(defaults = {}, uid = null) {
+  const effectiveUid = resolveUid(uid);
+  const scoped = readScopedJson(effectiveUid, PROFILE_SETTINGS_KEY, null);
+  const stored = scoped && typeof scoped === "object" ? scoped : readJSON(PROFILE_SETTINGS_KEY, {});
   return { ...defaults, ...stored };
 }
 
-export function saveStoredProfile(profile) {
-  writeJSON(PROFILE_SETTINGS_KEY, profile || {});
+export function saveStoredProfile(profile, uid = null) {
+  const effectiveUid = resolveUid(uid);
+  const next = profile || {};
+  if (effectiveUid) {
+    writeScopedJson(effectiveUid, PROFILE_SETTINGS_KEY, next);
+    return;
+  }
+  writeJSON(PROFILE_SETTINGS_KEY, next);
 }
 
-export function getStoredPreferences(defaults = {}) {
-  const stored = readJSON(PREFS_SETTINGS_KEY, {});
+export function getStoredPreferences(defaults = {}, uid = null) {
+  const effectiveUid = resolveUid(uid);
+  const scoped = readScopedJson(effectiveUid, PREFS_SETTINGS_KEY, null);
+  const stored = scoped && typeof scoped === "object" ? scoped : readJSON(PREFS_SETTINGS_KEY, {});
   return { ...defaults, ...stored };
 }
 
-export function saveStoredPreferences(preferences) {
+export function saveStoredPreferences(preferences, uid = null) {
+  const effectiveUid = resolveUid(uid);
   const next = { ...(preferences || {}) };
-  writeJSON(PREFS_SETTINGS_KEY, next);
+  if (effectiveUid) {
+    writeScopedJson(effectiveUid, PREFS_SETTINGS_KEY, next);
+  } else {
+    writeJSON(PREFS_SETTINGS_KEY, next);
+  }
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("elimulink-preferences-change", { detail: next }));
   }
 }
 
-export function getStoredLanguage(fallback = DEFAULT_APP_LANGUAGE) {
-  const prefs = getStoredPreferences({ language: fallback });
+export function getStoredLanguage(fallback = DEFAULT_APP_LANGUAGE, uid = null) {
+  const prefs = getStoredPreferences({ language: fallback }, uid);
   const language = String(prefs?.language || fallback).trim().toLowerCase();
   return language || fallback;
 }

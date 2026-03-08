@@ -23,6 +23,8 @@ router = APIRouter()
 async def ai_chat(request: Request, authorization: Optional[str] = Header(default=None)) -> object:
     body = await request.json()
     message = normalize_message(body or {})
+    mode = (body or {}).get("mode")
+    workspace_context = (body or {}).get("workspaceContext") or (body or {}).get("context") or {}
     if not message:
         return err_response("MESSAGE_REQUIRED", 400)
     try:
@@ -47,6 +49,8 @@ async def ai_chat(request: Request, authorization: Optional[str] = Header(defaul
             payload.message,
             payload.session_id,
             payload.app_type,
+            mode=mode,
+            workspace_context=workspace_context if isinstance(workspace_context, dict) else {},
         )
 
     stream_requested = str(request.query_params.get("stream", "")).strip() in {"1", "true", "yes"}

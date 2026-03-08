@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import NotebookPage from "./NotebookPage";
 import { apiGet, apiPost } from "../lib/apiClient";
+import { auth } from "../lib/firebase";
+import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 
 const leftNav = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
@@ -114,6 +116,27 @@ function makeAssignmentId() {
   return `g-assg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function defaultAssignments(ownerUid) {
+  return [
+    {
+      id: makeAssignmentId(),
+      ownerUid,
+      title: "Group Assignment 1",
+      description: "Compare sorting algorithms with examples from your course notes.",
+      body: "Write a concise comparison of at least 3 sorting algorithms and include complexity analysis.",
+      status: "saved",
+      submittedTo: "",
+      submittedBy: "",
+      submittedByRole: "",
+      submittedAt: 0,
+      uploadedBy: "Alice",
+      uploaderRole: "group_admin",
+      createdAt: Date.now() - 1000 * 60 * 60 * 8,
+      updatedAt: Date.now() - 1000 * 60 * 60 * 2,
+    },
+  ];
+}
+
 function makeFolderId() {
   return `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -150,15 +173,31 @@ function safeText(value) {
   return String(value || "").trim();
 }
 
-function loadStoredList(storageKey, normalizer, fallback = []) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    if (!Array.isArray(raw)) return fallback;
-    const normalized = raw.map((item) => normalizer(item)).filter(Boolean);
-    return normalized.length > 0 ? normalized : fallback;
-  } catch {
-    return fallback;
-  }
+function ownItem(item, ownerUid) {
+  return { ...item, ownerUid: item?.ownerUid || ownerUid };
+}
+
+function normalizeOwnedList(items, ownerUid, normalizer) {
+  if (!ownerUid || !Array.isArray(items)) return [];
+  return items
+    .map((item) => ownItem(item, ownerUid))
+    .filter((item) => (item?.ownerUid || ownerUid) === ownerUid)
+    .map((item) => normalizer(item))
+    .filter(Boolean);
+}
+
+function withOwnerList(items, ownerUid) {
+  if (!ownerUid || !Array.isArray(items)) return [];
+  return items
+    .map((item) => ownItem(item, ownerUid))
+    .filter((item) => (item?.ownerUid || ownerUid) === ownerUid);
+}
+
+function loadStoredList(ownerUid, storageKey, normalizer, fallback = []) {
+  if (!ownerUid) return fallback;
+  const raw = readScopedJson(ownerUid, storageKey, fallback);
+  const normalized = normalizeOwnedList(raw, ownerUid, normalizer);
+  return normalized.length > 0 ? normalized : fallback;
 }
 
 function normalizeDiscussionMessage(entry) {
@@ -299,10 +338,11 @@ function memberStatusTextClass(status) {
   return status === "online" ? "text-emerald-600" : "text-slate-500";
 }
 
-function createDefaultNoteFolders() {
+function createDefaultNoteFolders(ownerUid = null) {
   return [
     {
       id: makeFolderId(),
+      ownerUid,
       name: "General Notes",
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -311,31 +351,38 @@ function createDefaultNoteFolders() {
   ];
 }
 
-function loadStoredNoteFolders(storageKey) {
-  try {
-    const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    if (!Array.isArray(raw) || raw.length === 0) return createDefaultNoteFolders();
-    const normalized = raw
-      .map((folder) => ({
-        id: String(folder?.id || makeFolderId()),
-        name: String(folder?.name || "Folder"),
-        createdAt: Number(folder?.createdAt || Date.now()),
-        updatedAt: Number(folder?.updatedAt || Date.now()),
-        notes: Array.isArray(folder?.notes)
-          ? folder.notes.map((note) => ({
+function normalizeNoteFolders(raw, ownerUid) {
+  if (!Array.isArray(raw) || raw.length === 0) return createDefaultNoteFolders(ownerUid);
+  const normalized = raw
+    .map((folder) => {
+      const ownedFolder = ownItem(folder, ownerUid);
+      if ((ownedFolder?.ownerUid || ownerUid) !== ownerUid) return null;
+      return {
+        id: String(ownedFolder?.id || makeFolderId()),
+        ownerUid,
+        name: String(ownedFolder?.name || "Folder"),
+        createdAt: Number(ownedFolder?.createdAt || Date.now()),
+        updatedAt: Number(ownedFolder?.updatedAt || Date.now()),
+        notes: Array.isArray(ownedFolder?.notes)
+          ? ownedFolder.notes.map((note) => ({
               id: String(note?.id || makeNoteId()),
+              ownerUid,
               title: String(note?.title || "Untitled Note"),
               content: String(note?.content || ""),
               createdAt: Number(note?.createdAt || Date.now()),
               updatedAt: Number(note?.updatedAt || Date.now()),
             }))
           : [],
-      }))
-      .filter((folder) => folder.name.trim().length > 0);
-    return normalized.length > 0 ? normalized : createDefaultNoteFolders();
-  } catch {
-    return createDefaultNoteFolders();
-  }
+      };
+    })
+    .filter((folder) => folder && folder.name.trim().length > 0);
+  return normalized.length > 0 ? normalized : createDefaultNoteFolders(ownerUid);
+}
+
+function loadStoredNoteFolders(ownerUid, storageKey) {
+  if (!ownerUid) return createDefaultNoteFolders(ownerUid);
+  const raw = readScopedJson(ownerUid, storageKey, []);
+  return normalizeNoteFolders(raw, ownerUid);
 }
 
 function formatDateTime(value) {
@@ -510,13 +557,11 @@ function RightTabs({ tab, setTab }) {
 }
 
 export default function SubgroupRoom({ onPushNotification }) {
+  const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
+  const previousUidRef = useRef(auth.currentUser?.uid || null);
   const [active, setActive] = useState("board");
   const [rightTab, setRightTab] = useState("chat");
-  const [groupRegistry, setGroupRegistry] = useState(() =>
-    loadStoredList(GROUP_REGISTRY_STORAGE_KEY, normalizeGroupRegistryItem, [
-      normalizeGroupRegistryItem({ ...DEFAULT_GROUP, updatedAt: Date.now() }),
-    ]).filter(Boolean)
-  );
+  const [groupRegistry, setGroupRegistry] = useState([]);
   const [isGroupListPopupOpen, setIsGroupListPopupOpen] = useState(false);
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
@@ -600,9 +645,7 @@ export default function SubgroupRoom({ onPushNotification }) {
   const [boardStatus, setBoardStatus] = useState("");
   const boardCanvasRef = useRef(null);
   const boardCanvasWrapRef = useRef(null);
-  const [noteFolders, setNoteFolders] = useState(() =>
-    loadStoredNoteFolders(`${GROUP_NOTES_FOLDERS_STORAGE_PREFIX}${DEFAULT_GROUP.id}`)
-  );
+  const [noteFolders, setNoteFolders] = useState(() => createDefaultNoteFolders(currentUid));
   const [selectedFolderId, setSelectedFolderId] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const [isFolderCreateOpen, setIsFolderCreateOpen] = useState(false);
@@ -663,39 +706,50 @@ export default function SubgroupRoom({ onPushNotification }) {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [assignmentStatus, setAssignmentStatus] = useState("");
   const [shareStatus, setShareStatus] = useState("");
-  const [assignments, setAssignments] = useState(() => {
-    const fallback = [
-      {
-        id: makeAssignmentId(),
-        title: "Group Assignment 1",
-        description: "Compare sorting algorithms with examples from your course notes.",
-        body: "Write a concise comparison of at least 3 sorting algorithms and include complexity analysis.",
-        status: "saved",
-        submittedTo: "",
-        submittedBy: "",
-        submittedByRole: "",
-        submittedAt: 0,
-        uploadedBy: "Alice",
-        uploaderRole: "group_admin",
-        createdAt: Date.now() - 1000 * 60 * 60 * 8,
-        updatedAt: Date.now() - 1000 * 60 * 60 * 2,
-      },
-    ];
-    try {
-      const raw = JSON.parse(localStorage.getItem(assignmentsStorageKey) || "[]");
-      return Array.isArray(raw) && raw.length > 0 ? raw : fallback;
-    } catch {
-      return fallback;
-    }
-  });
+  const [assignments, setAssignments] = useState([]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(assignmentsStorageKey, JSON.stringify(assignments));
-    } catch {
-      // no-op
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+      const nextUid = firebaseUser?.uid || null;
+      if (previousUidRef.current !== nextUid) {
+        setAssignments([]);
+        setChatMessages([]);
+        setAiMessages([]);
+        setCommentMessages([]);
+        setActivityFeed([]);
+        setJoinRequests([]);
+        setAccessDecisions([]);
+        setBoardText("");
+        setBoardStrokes([]);
+        setNoteFolders([]);
+        setSelectedAssignmentId("");
+      }
+      previousUidRef.current = nextUid;
+      setCurrentUid(nextUid);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!currentUid) {
+      setGroupRegistry([]);
+      return;
     }
-  }, [assignments, assignmentsStorageKey]);
+    const registryFallback = [normalizeGroupRegistryItem({ ...DEFAULT_GROUP, updatedAt: Date.now(), ownerUid: currentUid })].filter(Boolean);
+    setGroupRegistry(loadStoredList(currentUid, GROUP_REGISTRY_STORAGE_KEY, normalizeGroupRegistryItem, registryFallback).filter(Boolean));
+  }, [currentUid]);
+
+  useEffect(() => {
+    if (!currentUid) return;
+    const loaded = readScopedJson(currentUid, assignmentsStorageKey, defaultAssignments(currentUid));
+    const owned = withOwnerList(loaded, currentUid);
+    setAssignments(owned.length > 0 ? owned : defaultAssignments(currentUid));
+  }, [currentUid, assignmentsStorageKey]);
+
+  useEffect(() => {
+    if (!currentUid) return;
+    writeScopedJson(currentUid, assignmentsStorageKey, withOwnerList(assignments, currentUid));
+  }, [currentUid, assignments, assignmentsStorageKey]);
 
   useEffect(() => {
     if (selectedAssignmentId && assignments.some((item) => item.id === selectedAssignmentId)) return;
@@ -712,18 +766,19 @@ export default function SubgroupRoom({ onPushNotification }) {
         createdAt: Date.now() - 1000 * 60 * 10,
       },
     ];
-    setChatMessages(loadStoredList(groupChatStorageKey, normalizeDiscussionMessage, fallback));
+    setChatMessages(loadStoredList(currentUid, groupChatStorageKey, normalizeDiscussionMessage, fallback));
     setChatInput("");
     setChatSenderId("you");
-  }, [groupChatStorageKey]);
+  }, [currentUid, groupChatStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupChatStorageKey, JSON.stringify(chatMessages.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupChatStorageKey, chatMessages]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupChatStorageKey,
+      withOwnerList(chatMessages.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupChatStorageKey, chatMessages]);
 
   useEffect(() => {
     const fallback = [
@@ -735,19 +790,20 @@ export default function SubgroupRoom({ onPushNotification }) {
         createdAt: Date.now() - 1000 * 60 * 8,
       },
     ];
-    setAiMessages(loadStoredList(groupAiThreadStorageKey, normalizeDiscussionMessage, fallback));
+    setAiMessages(loadStoredList(currentUid, groupAiThreadStorageKey, normalizeDiscussionMessage, fallback));
     setAiInput("");
     setAiRequesterId("you");
     setAiThinking(false);
-  }, [groupAiThreadStorageKey]);
+  }, [currentUid, groupAiThreadStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupAiThreadStorageKey, JSON.stringify(aiMessages.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupAiThreadStorageKey, aiMessages]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupAiThreadStorageKey,
+      withOwnerList(aiMessages.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupAiThreadStorageKey, aiMessages]);
 
   useEffect(() => {
     const fallback = [
@@ -759,18 +815,19 @@ export default function SubgroupRoom({ onPushNotification }) {
         createdAt: Date.now() - 1000 * 60 * 6,
       },
     ];
-    setCommentMessages(loadStoredList(groupCommentsStorageKey, normalizeDiscussionMessage, fallback));
+    setCommentMessages(loadStoredList(currentUid, groupCommentsStorageKey, normalizeDiscussionMessage, fallback));
     setCommentInput("");
     setCommentAuthorId("you");
-  }, [groupCommentsStorageKey]);
+  }, [currentUid, groupCommentsStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupCommentsStorageKey, JSON.stringify(commentMessages.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupCommentsStorageKey, commentMessages]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupCommentsStorageKey,
+      withOwnerList(commentMessages.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupCommentsStorageKey, commentMessages]);
 
   useEffect(() => {
     const fallback = [
@@ -784,56 +841,59 @@ export default function SubgroupRoom({ onPushNotification }) {
         createdAt: Date.now() - 1000 * 60 * 4,
       },
     ];
-    setActivityFeed(loadStoredList(groupActivityStorageKey, normalizeActivityItem, fallback));
+    setActivityFeed(loadStoredList(currentUid, groupActivityStorageKey, normalizeActivityItem, fallback));
     setActivityFilter("all");
-  }, [groupActivityStorageKey, members.length]);
+  }, [currentUid, groupActivityStorageKey, members.length]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupActivityStorageKey, JSON.stringify(activityFeed.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupActivityStorageKey, activityFeed]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupActivityStorageKey,
+      withOwnerList(activityFeed.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupActivityStorageKey, activityFeed]);
 
   useEffect(() => {
-    setJoinRequests(loadStoredList(groupJoinRequestsStorageKey, normalizeJoinRequestItem, []));
-  }, [groupJoinRequestsStorageKey]);
+    setJoinRequests(loadStoredList(currentUid, groupJoinRequestsStorageKey, normalizeJoinRequestItem, []));
+  }, [currentUid, groupJoinRequestsStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupJoinRequestsStorageKey, JSON.stringify(joinRequests.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupJoinRequestsStorageKey, joinRequests]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupJoinRequestsStorageKey,
+      withOwnerList(joinRequests.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupJoinRequestsStorageKey, joinRequests]);
 
   useEffect(() => {
-    setAccessDecisions(loadStoredList(groupAccessDecisionsStorageKey, normalizeAccessDecisionItem, []));
-  }, [groupAccessDecisionsStorageKey]);
+    setAccessDecisions(loadStoredList(currentUid, groupAccessDecisionsStorageKey, normalizeAccessDecisionItem, []));
+  }, [currentUid, groupAccessDecisionsStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(groupAccessDecisionsStorageKey, JSON.stringify(accessDecisions.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupAccessDecisionsStorageKey, accessDecisions]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      groupAccessDecisionsStorageKey,
+      withOwnerList(accessDecisions.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupAccessDecisionsStorageKey, accessDecisions]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !currentUid) return;
     const onStorage = (event) => {
       if (!event?.key) return;
-      if (event.key === groupJoinRequestsStorageKey) {
-        setJoinRequests(loadStoredList(groupJoinRequestsStorageKey, normalizeJoinRequestItem, []));
+      if (event.key.endsWith(`:${groupJoinRequestsStorageKey}`)) {
+        setJoinRequests(loadStoredList(currentUid, groupJoinRequestsStorageKey, normalizeJoinRequestItem, []));
       }
-      if (event.key === groupAccessDecisionsStorageKey) {
-        setAccessDecisions(loadStoredList(groupAccessDecisionsStorageKey, normalizeAccessDecisionItem, []));
+      if (event.key.endsWith(`:${groupAccessDecisionsStorageKey}`)) {
+        setAccessDecisions(loadStoredList(currentUid, groupAccessDecisionsStorageKey, normalizeAccessDecisionItem, []));
       }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [groupJoinRequestsStorageKey, groupAccessDecisionsStorageKey]);
+  }, [currentUid, groupJoinRequestsStorageKey, groupAccessDecisionsStorageKey]);
 
   const selectedAssignment = assignments.find((item) => item.id === selectedAssignmentId) || null;
   const selectedFolder = noteFolders.find((folder) => folder.id === selectedFolderId) || noteFolders[0] || null;
@@ -899,17 +959,14 @@ export default function SubgroupRoom({ onPushNotification }) {
   ];
 
   useEffect(() => {
-    const loaded = loadStoredNoteFolders(notesFoldersStorageKey);
+    const loaded = loadStoredNoteFolders(currentUid, notesFoldersStorageKey);
     setNoteFolders(loaded);
-  }, [notesFoldersStorageKey]);
+  }, [currentUid, notesFoldersStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(notesFoldersStorageKey, JSON.stringify(noteFolders));
-    } catch {
-      // no-op
-    }
-  }, [noteFolders, notesFoldersStorageKey]);
+    if (!currentUid) return;
+    writeScopedJson(currentUid, notesFoldersStorageKey, withOwnerList(noteFolders, currentUid));
+  }, [currentUid, noteFolders, notesFoldersStorageKey]);
 
   useEffect(() => {
     if (selectedFolderId && noteFolders.some((folder) => folder.id === selectedFolderId)) return;
@@ -945,12 +1002,13 @@ export default function SubgroupRoom({ onPushNotification }) {
   }, [isCreateMenuOpen]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(GROUP_REGISTRY_STORAGE_KEY, JSON.stringify(groupRegistry.slice(0, MAX_PANEL_ITEMS)));
-    } catch {
-      // no-op
-    }
-  }, [groupRegistry]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      GROUP_REGISTRY_STORAGE_KEY,
+      withOwnerList(groupRegistry.slice(0, MAX_PANEL_ITEMS), currentUid)
+    );
+  }, [currentUid, groupRegistry]);
 
   useEffect(() => {
     const nextEntry = normalizeGroupRegistryItem({ ...group, updatedAt: Date.now() });
@@ -1052,65 +1110,67 @@ export default function SubgroupRoom({ onPushNotification }) {
   }, [group.id, group.name, group.course, group.visibility, group.inviteCode, groupRegistry]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(boardTypingStorageKey);
-      setBoardText(String(raw || ""));
-    } catch {
+    if (!currentUid) {
       setBoardText("");
+      setSharedTypingStatus("");
+      return;
     }
+    const raw = readScopedJson(currentUid, boardTypingStorageKey, "");
+    setBoardText(typeof raw === "string" ? raw : String(raw || ""));
     setSharedTypingStatus("");
-  }, [boardTypingStorageKey]);
+  }, [currentUid, boardTypingStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(boardTypingStorageKey, String(boardText || ""));
-    } catch {
-      // no-op
-    }
-  }, [boardText, boardTypingStorageKey]);
+    if (!currentUid) return;
+    writeScopedJson(currentUid, boardTypingStorageKey, String(boardText || ""));
+  }, [currentUid, boardText, boardTypingStorageKey]);
 
   useEffect(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(boardStrokesStorageKey) || "[]");
-      if (!Array.isArray(raw)) {
-        setBoardStrokes([]);
-        return;
-      }
-      const normalized = raw
-        .map((stroke) => ({
-          id: String(stroke?.id || makeStrokeId()),
-          authorId: String(stroke?.authorId || "unknown"),
-          authorName: String(stroke?.authorName || "Unknown"),
-          color: String(stroke?.color || "#0f172a"),
-          width: Number(stroke?.width || 3),
-          createdAt: Number(stroke?.createdAt || Date.now()),
-          points: Array.isArray(stroke?.points)
-            ? stroke.points
-                .map((point) => ({
-                  x: Number(point?.x || 0),
-                  y: Number(point?.y || 0),
-                }))
-                .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
-            : [],
-        }))
-        .filter((stroke) => stroke.points.length > 1)
-        .slice(-600);
-      setBoardStrokes(normalized);
-    } catch {
+    if (!currentUid) {
       setBoardStrokes([]);
+      setCurrentBoardStroke(null);
+      setIsBoardDrawing(false);
+      setBoardCursors({});
+      return;
     }
+    const raw = readScopedJson(currentUid, boardStrokesStorageKey, []);
+    const source = Array.isArray(raw)
+      ? raw.filter((stroke) => (stroke?.ownerUid || currentUid) === currentUid)
+      : [];
+    const normalized = source
+      .map((stroke) => ({
+        id: String(stroke?.id || makeStrokeId()),
+        ownerUid: currentUid,
+        authorId: String(stroke?.authorId || "unknown"),
+        authorName: String(stroke?.authorName || "Unknown"),
+        color: String(stroke?.color || "#0f172a"),
+        width: Number(stroke?.width || 3),
+        createdAt: Number(stroke?.createdAt || Date.now()),
+        points: Array.isArray(stroke?.points)
+          ? stroke.points
+              .map((point) => ({
+                x: Number(point?.x || 0),
+                y: Number(point?.y || 0),
+              }))
+              .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+          : [],
+      }))
+      .filter((stroke) => stroke.points.length > 1)
+      .slice(-600);
+    setBoardStrokes(normalized);
     setCurrentBoardStroke(null);
     setIsBoardDrawing(false);
     setBoardCursors({});
-  }, [boardStrokesStorageKey]);
+  }, [currentUid, boardStrokesStorageKey]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(boardStrokesStorageKey, JSON.stringify(boardStrokes.slice(-600)));
-    } catch {
-      // no-op
-    }
-  }, [boardStrokes, boardStrokesStorageKey]);
+    if (!currentUid) return;
+    writeScopedJson(
+      currentUid,
+      boardStrokesStorageKey,
+      withOwnerList(boardStrokes.slice(-600), currentUid)
+    );
+  }, [currentUid, boardStrokes, boardStrokesStorageKey]);
 
   useEffect(() => {
     if (active !== "board") return;
@@ -2607,22 +2667,20 @@ export default function SubgroupRoom({ onPushNotification }) {
       onPushNotification({ title, detail, type });
       return;
     }
-    try {
-      const raw = JSON.parse(localStorage.getItem(INSTITUTION_NOTIFICATIONS_KEY) || "[]");
-      const current = Array.isArray(raw) ? raw : [];
-      const nextItem = {
-        id: `ntf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        title: String(title || "Subgroup update"),
-        detail: String(detail || ""),
-        type: String(type || "info"),
-        read: false,
-        createdAt: Date.now(),
-      };
-      localStorage.setItem(INSTITUTION_NOTIFICATIONS_KEY, JSON.stringify([nextItem, ...current].slice(0, 40)));
-      window.dispatchEvent(new CustomEvent("institution-notifications-updated", { detail: nextItem }));
-    } catch {
-      // no-op
-    }
+    if (!currentUid) return;
+    const current = readScopedJson(currentUid, INSTITUTION_NOTIFICATIONS_KEY, []);
+    const nextList = Array.isArray(current) ? current : [];
+    const nextItem = {
+      id: `ntf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      ownerUid: currentUid,
+      title: String(title || "Subgroup update"),
+      detail: String(detail || ""),
+      type: String(type || "info"),
+      read: false,
+      createdAt: Date.now(),
+    };
+    writeScopedJson(currentUid, INSTITUTION_NOTIFICATIONS_KEY, [nextItem, ...nextList].slice(0, 40));
+    window.dispatchEvent(new CustomEvent("institution-notifications-updated", { detail: nextItem }));
   }
 
   function logGroupActivity({ type = "system", title, detail, actorName = "System", notify = true }) {

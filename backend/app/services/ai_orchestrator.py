@@ -27,6 +27,8 @@ async def run_orchestrator(
     message: str,
     session_id: Optional[str],
     app_type: Optional[str],
+    mode: Optional[str] = None,
+    workspace_context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str, str, Optional[str]]:
     resolved_app = resolve_app_type(app_type)
     role = resolve_role(user)
@@ -68,6 +70,8 @@ async def run_orchestrator(
     answer, error_code = await generate_answer(
         prompt,
         {"app_type": resolved_app, "role": role, "tool_data": tool_data or {}, "history": history},
+        mode=mode,
+        workspace_context=workspace_context,
     )
     latency_ms = int((time.perf_counter() - start) * 1000)
     save_message(

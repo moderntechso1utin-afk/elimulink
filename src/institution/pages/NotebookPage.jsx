@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { auth } from "../../lib/firebase";
+import { readScopedJson, writeScopedJson } from "../../lib/userScopedStorage";
 
 const THEMES = [
   { key: "classic", name: "Classic", editorBg: "bg-white", boardBg: "bg-slate-100" },
@@ -29,6 +31,35 @@ function uid() {
   return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
 }
 
+function defaultNotes(ownerUid) {
+  const id = uid();
+  return [
+    {
+      id,
+      ownerUid,
+      title: "Welcome Note",
+      content: "Start writing your unit notes here...\n\nTip: Use the toolbar above.",
+      pinned: true,
+      updatedAt: nowIso(),
+      createdAt: nowIso(),
+    },
+  ];
+}
+
+function defaultStickies(ownerUid) {
+  return [
+    { id: uid(), ownerUid, text: "Buy lab book", color: "yellow", createdAt: nowIso() },
+    { id: uid(), ownerUid, text: "Revise Week 3 slides", color: "blue", createdAt: nowIso() },
+  ];
+}
+
+function normalizeOwned(items, ownerUid) {
+  if (!ownerUid || !Array.isArray(items)) return [];
+  return items
+    .map((item) => ({ ...item, ownerUid: item?.ownerUid || ownerUid }))
+    .filter((item) => (item?.ownerUid || ownerUid) === ownerUid);
+}
+
 function ToolbarButton({ label, onClick, active }) {
   return (
     <button
@@ -47,6 +78,8 @@ function ToolbarButton({ label, onClick, active }) {
 }
 
 export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
+  const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
+  const previousUidRef = useRef(auth.currentUser?.uid || null);
   const [isNotesPanelOpen, setIsNotesPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState("notes");
   const [theme, setTheme] = useState("classic");
@@ -54,36 +87,11 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
   const [isNotesOverlayOpen, setIsNotesOverlayOpen] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(false);
 
-  const [notes, setNotes] = useState(() => {
-    const saved = localStorage.getItem("institution_notebook_notes");
-    if (saved) return JSON.parse(saved);
-    const id = uid();
-    return [
-      {
-        id,
-        title: "Welcome Note",
-        content: "Start writing your unit notes here...\n\nTip: Use the toolbar above.",
-        pinned: true,
-        updatedAt: nowIso(),
-        createdAt: nowIso(),
-      },
-    ];
-  });
-
-  const [stickies, setStickies] = useState(() => {
-    const saved = localStorage.getItem("elimulink_notebook_stickies");
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: uid(), text: "Buy lab book", color: "yellow", createdAt: nowIso() },
-      { id: uid(), text: "Revise Week 3 slides", color: "blue", createdAt: nowIso() },
-    ];
-  });
+  const [notes, setNotes] = useState(() => defaultNotes(currentUid));
+  const [stickies, setStickies] = useState(() => defaultStickies(currentUid));
 
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState(() => {
-    const last = localStorage.getItem("elimulink_notebook_selected");
-    return last || (notes[0]?.id ?? "");
-  });
+  const [selectedId, setSelectedId] = useState("");
 
   const [saving, setSaving] = useState(false);
   const saveTimer = useRef(null);
@@ -102,12 +110,55 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
   }, [notes]);
 
   useEffect(() => {
-    localStorage.setItem("elimulink_notebook_stickies", JSON.stringify(stickies));
-  }, [stickies]);
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+      const nextUid = firebaseUser?.uid || null;
+      const previousUid = previousUidRef.current;
+      if (previousUid !== nextUid) {
+        setNotes([]);
+        setStickies([]);
+        setSelectedId("");
+        setQuery("");
+      }
+      previousUidRef.current = nextUid;
+      setCurrentUid(nextUid);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    if (selectedId) localStorage.setItem("elimulink_notebook_selected", selectedId);
-  }, [selectedId]);
+    if (!currentUid) {
+      setNotes([]);
+      setStickies([]);
+      setSelectedId("");
+      return;
+    }
+    const loadedNotes = normalizeOwned(
+      readScopedJson(currentUid, "institution_notebook_notes", defaultNotes(currentUid)),
+      currentUid
+    );
+    const loadedStickies = normalizeOwned(
+      readScopedJson(currentUid, "elimulink_notebook_stickies", defaultStickies(currentUid)),
+      currentUid
+    );
+    const savedSelected = readScopedJson(currentUid, "elimulink_notebook_selected", null);
+    const nextNotes = loadedNotes.length > 0 ? loadedNotes : defaultNotes(currentUid);
+    const nextStickies = loadedStickies.length > 0 ? loadedStickies : defaultStickies(currentUid);
+    setNotes(nextNotes);
+    setStickies(nextStickies);
+    setSelectedId(
+      nextNotes.some((item) => item.id === savedSelected) ? savedSelected : (nextNotes[0]?.id ?? "")
+    );
+  }, [currentUid]);
+
+  useEffect(() => {
+    if (!currentUid) return;
+    writeScopedJson(currentUid, "elimulink_notebook_stickies", normalizeOwned(stickies, currentUid));
+  }, [stickies, currentUid]);
+
+  useEffect(() => {
+    if (!currentUid || !selectedId) return;
+    writeScopedJson(currentUid, "elimulink_notebook_selected", selectedId);
+  }, [selectedId, currentUid]);
 
   useEffect(() => {
     if (!isNotesOverlayOpen) return;
@@ -118,14 +169,15 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
   }, [isNotesOverlayOpen]);
 
   function scheduleSave() {
+    if (!currentUid) return;
     setSaving(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      try {
-        localStorage.setItem("institution_notebook_notes", JSON.stringify(notesRef.current || []));
-      } catch {
-        // no-op
-      }
+      writeScopedJson(
+        currentUid,
+        "institution_notebook_notes",
+        normalizeOwned(notesRef.current || [], currentUid)
+      );
       setSaving(false);
     }, 500);
   }
@@ -134,6 +186,7 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
     const id = uid();
     const newNote = {
       id,
+      ownerUid: currentUid,
       title: "Untitled Note",
       content: "",
       pinned: false,
@@ -171,7 +224,7 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
 
   function addSticky() {
     setStickies((prev) => [
-      { id: uid(), text: "New sticky note...", color: "yellow", createdAt: nowIso() },
+      { id: uid(), ownerUid: currentUid, text: "New sticky note...", color: "yellow", createdAt: nowIso() },
       ...prev,
     ]);
   }
@@ -602,4 +655,3 @@ export default function NotebookPage({ onBack = null, onOpenDrawer = null }) {
   );
 }
 
-'@ | Set-Content -Path src/institution/pages/NotebookPage.jsx -Encoding utf8"} to=functions.shell_command ￣色.commentary code=json

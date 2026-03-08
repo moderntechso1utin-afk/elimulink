@@ -44,6 +44,7 @@ import {
 import { auth } from "../lib/firebase";
 import { signOut } from "firebase/auth";
 import { apiUrl } from "../lib/apiUrl";
+import { readScopedJson, writeScopedJson } from "../lib/userScopedStorage";
 import { getStoredPreferences, getStoredProfile } from "../lib/userSettings";
 import SettingsPage from "./SettingsPage";
 import NotebookPage from "./NotebookPage";
@@ -51,6 +52,7 @@ import SubgroupRoom from "./SubgroupRoom";
 import CoursesDashboard from "./CoursesDashboard";
 import AssignmentsPage from "./AssignmentsPage";
 import ResultsPage from "./ResultsPage";
+import AdminAnalyticsLanding from "./AdminAnalyticsLanding";
 
 const MAIN_ITEMS = [
   { key: "newchat", label: "NewChat", icon: LayoutGrid },
@@ -79,80 +81,167 @@ const ACTIVE_VIEW_KEY = "institution_active_view_v1";
 const UNTITLED_CHAT_BASE = "New Chat";
 const AI_PATH = "/api/ai/chat";
 
-const ACADEMIC_STARTERS = [
-  {
-    key: "assignment_help",
-    label: "Assignment help",
-    emoji: "📝",
-    prefill: "Help me with this assignment...",
-    suggestions: [
-      "Help me answer this assignment step by step",
-      "Explain this assignment question in simple terms",
-      "Help me structure my response",
-      "Give me a similar practice question",
+const CHAT_MODE_CONFIG = {
+  student: {
+    title: "Hi Victor, where should we start?",
+    subtitle:
+      "Ask anything about coursework, assignments, revision, research, or coding.",
+    starters: [
+      {
+        key: "assignment_help",
+        label: "Assignment help",
+        emoji: "📝",
+        prefill: "Help me with this assignment...",
+        suggestions: [
+          "Help me answer this assignment step by step",
+          "Explain this assignment question in simple terms",
+          "Help me structure my response",
+          "Give me a similar practice question",
+        ],
+      },
+      {
+        key: "notes_summary",
+        label: "Notes summary",
+        emoji: "📚",
+        prefill: "Summarize these notes...",
+        suggestions: [
+          "Turn these notes into revision points",
+          "Summarize this lecture in simple terms",
+          "Create flashcards from this topic",
+          "Extract the key ideas only",
+        ],
+      },
+      {
+        key: "exam_prep",
+        label: "Exam prep",
+        emoji: "🎯",
+        prefill: "Help me revise...",
+        suggestions: [
+          "Quiz me on this topic",
+          "Give me likely exam questions",
+          "Explain this topic for revision",
+          "Create a short revision guide",
+        ],
+      },
+      {
+        key: "research",
+        label: "Research",
+        emoji: "🔎",
+        prefill: "Help me research...",
+        suggestions: [
+          "Help me find sources for this topic",
+          "Turn this topic into research questions",
+          "Summarize the background of this topic",
+          "Help me build a research outline",
+        ],
+      },
+      {
+        key: "writing_help",
+        label: "Writing help",
+        emoji: "✍️",
+        prefill: "Help me write...",
+        suggestions: [
+          "Help me write an introduction",
+          "Improve this paragraph academically",
+          "Rewrite this in a formal tone",
+          "Help me organize my ideas",
+        ],
+      },
+      {
+        key: "code_help",
+        label: "Code help",
+        emoji: "💻",
+        prefill: "Help me debug this code...",
+        suggestions: [
+          "Help me debug my code",
+          "Help me write a function",
+          "Help me simplify my code",
+          "Help me learn this programming concept",
+        ],
+      },
     ],
   },
-  {
-    key: "notes_summary",
-    label: "Notes summary",
-    emoji: "📚",
-    prefill: "Summarize these notes...",
-    suggestions: [
-      "Turn these notes into revision points",
-      "Summarize this lecture in simple terms",
-      "Create flashcards from this topic",
-      "Extract the key ideas only",
+
+  admin: {
+    title: "Welcome to the ElimuLink Administrative Assistant.",
+    subtitle:
+      "Ask about workflows, results, attendance, announcements, compliance, or department operations.",
+    starters: [
+      {
+        key: "workflow_review",
+        label: "Workflow review",
+        emoji: "🗂️",
+        prefill: "Summarize the current workflow situation...",
+        suggestions: [
+          "Show me pending approvals",
+          "Summarize workflows needing attention",
+          "Which issues are blocked right now?",
+          "Give me today's workflow snapshot",
+        ],
+      },
+      {
+        key: "results_oversight",
+        label: "Results oversight",
+        emoji: "📘",
+        prefill: "Help me review academic results activity...",
+        suggestions: [
+          "Summarize missing marks issues",
+          "Show result risks needing review",
+          "Explain the current approval queue",
+          "Generate a results oversight summary",
+        ],
+      },
+      {
+        key: "attendance_alerts",
+        label: "Attendance alerts",
+        emoji: "📊",
+        prefill: "Analyze attendance patterns...",
+        suggestions: [
+          "Show attendance risks by subgroup",
+          "Which classes have low participation?",
+          "Summarize attendance concerns",
+          "Generate an attendance alert summary",
+        ],
+      },
+      {
+        key: "announcements",
+        label: "Announcements",
+        emoji: "📣",
+        prefill: "Help me draft an announcement...",
+        suggestions: [
+          "Draft a notice to lecturers",
+          "Draft a notice to students",
+          "Rewrite this announcement professionally",
+          "Summarize recent communication activity",
+        ],
+      },
+      {
+        key: "audit_and_compliance",
+        label: "Audit & compliance",
+        emoji: "🛡️",
+        prefill: "Summarize recent audit activity...",
+        suggestions: [
+          "Show recent sensitive actions",
+          "Summarize compliance-related events",
+          "Flag unusual operational activity",
+          "Draft a dean-level audit summary",
+        ],
+      },
+      {
+        key: "department_report",
+        label: "Department report",
+        emoji: "🧠",
+        prefill: "Generate a department performance summary...",
+        suggestions: [
+          "Create a weekly department summary",
+          "Summarize staff and lecturer activity",
+          "Highlight operational risks",
+          "Draft a board-ready department report",
+        ],
+      },
     ],
   },
-  {
-    key: "exam_prep",
-    label: "Exam prep",
-    emoji: "🎯",
-    prefill: "Help me revise...",
-    suggestions: [
-      "Quiz me on this topic",
-      "Give me likely exam questions",
-      "Explain this topic for revision",
-      "Create a short revision guide",
-    ],
-  },
-  {
-    key: "research",
-    label: "Research",
-    emoji: "🔎",
-    prefill: "Help me research...",
-    suggestions: [
-      "Help me find sources for this topic",
-      "Turn this topic into research questions",
-      "Summarize the background of this topic",
-      "Help me build a research outline",
-    ],
-  },
-  {
-    key: "writing_help",
-    label: "Writing help",
-    emoji: "✍️",
-    prefill: "Help me write...",
-    suggestions: [
-      "Help me write an introduction",
-      "Improve this paragraph academically",
-      "Rewrite this in a formal tone",
-      "Help me organize my ideas",
-    ],
-  },
-  {
-    key: "code_help",
-    label: "Code help",
-    emoji: "💻",
-    prefill: "Help me...",
-    suggestions: [
-      "Help me debug my code",
-      "Help me write a function",
-      "Help me simplify my code",
-      "Help me learn this programming concept",
-    ],
-  },
-];
+};
 
 const COMPOSER_TOOL_PRESETS = [
   { key: "create_image", label: "Create image", prompt: "Create an image concept for this topic..." },
@@ -204,6 +293,13 @@ function initialsOf(name) {
 
 function buildWelcomeMessage(name) {
   return `${timeGreeting()}, ${firstNameOf(name)}! I'm ElimuLink AI. What would you like to research today?`;
+}
+
+function getDefaultAssistantMessage(mode = "student", name = "Scholar") {
+  if (mode === "admin") {
+    return "Welcome to the ElimuLink Administrative Assistant. I can help with workflows, analytics, reports, results, attendance, and department operations.";
+  }
+  return buildWelcomeMessage(name);
 }
 
 function makeChatId() {
@@ -411,12 +507,15 @@ function sectionLabelFromTimestamp(timestamp, now = Date.now()) {
   return date.toLocaleDateString([], { month: "short", year: "numeric" });
 }
 
-function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "") {
+function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", ownerUid = null) {
   return {
     id: makeChatId(),
+    ownerUid,
     title,
     updatedAt: Date.now(),
-    messages: assistantText ? [{ role: "assistant", text: assistantText, createdAt: Date.now() }] : [],
+    messages: assistantText
+      ? [{ role: "assistant", text: assistantText, ownerUid, createdAt: Date.now() }]
+      : [],
   };
 }
 
@@ -842,35 +941,27 @@ function SectionLabel({ collapsed, children }) {
 }
 
 export default function NewChatLanding({
+  active: initialView = "chat",
   onOpenAdmin,
+  chatMode = "student",
+  workspaceContext = null,
   userRole: initialUserRole,
   initialAssistantMessage,
 }) {
   const firebaseUser = auth?.currentUser || null;
   const profileName = resolveProfileName(firebaseUser);
-  const welcomeText = buildWelcomeMessage(profileName);
-  const defaultAssistantMessage = String(initialAssistantMessage || "").trim() || welcomeText;
+  const resolvedChatMode = chatMode === "admin" ? "admin" : "student";
+  const modeConfig = CHAT_MODE_CONFIG[resolvedChatMode];
+  const starterSet = modeConfig.starters;
+  const defaultAssistantMessage =
+    String(initialAssistantMessage || "").trim() ||
+    getDefaultAssistantMessage(resolvedChatMode, profileName);
 
-  const [active, setActive] = useState("newchat");
+  const [active, setActive] = useState(initialView === "chat" ? "newchat" : (initialView || "newchat"));
   const [userRole, setUserRole] = useState(initialUserRole || null);
   const [input, setInput] = useState("");
-  const [chats, setChats] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]");
-      return Array.isArray(saved) && saved.length > 0
-        ? normalizeChatTitles(saved)
-        : [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage)];
-    } catch {
-      return [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage)];
-    }
-  });
-  const [activeChatId, setActiveChatId] = useState(() => {
-    try {
-      return localStorage.getItem(CHAT_ACTIVE_KEY) || "";
-    } catch {
-      return "";
-    }
-  });
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState("");
   const [isNewChatMenuOpen, setIsNewChatMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isNotificationsMenuOpen, setIsNotificationsMenuOpen] = useState(false);
@@ -933,6 +1024,7 @@ export default function NewChatLanding({
   const [virtualizationTick, setVirtualizationTick] = useState(0);
   const [selectedStarter, setSelectedStarter] = useState(null);
   const [starterSuggestions, setStarterSuggestions] = useState([]);
+  const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid || null);
   const recognitionRef = useRef(null);
   const mobileAttachmentMenuRef = useRef(null);
   const desktopAttachmentMenuRef = useRef(null);
@@ -949,6 +1041,7 @@ export default function NewChatLanding({
   const desktopPromptInputRef = useRef(null);
   const lastSpokenRef = useRef({ text: "", at: 0 });
   const renderCountRef = useRef(0);
+  const previousUidRef = useRef(auth.currentUser?.uid || null);
   const scrollHideTimerRef = useRef(null);
   const scrollFrameRef = useRef(null);
   const scrollLabelRef = useRef("Today");
@@ -960,6 +1053,27 @@ export default function NewChatLanding({
   const attachmentSourceRef = useRef("file");
   const [fileAcceptMode, setFileAcceptMode] = useState("");
   const [fileCaptureMode, setFileCaptureMode] = useState("");
+
+  function clearSessionUiState() {
+    setChats([]);
+    setActiveChatId(null);
+    setInput("");
+    setAttachments([]);
+    setNotifications([]);
+    setSelectedStarter?.(null);
+    setStarterSuggestions?.([]);
+  }
+
+  function normalizeOwnedChats(items, uid) {
+    if (!uid || !Array.isArray(items)) return [];
+    return items
+      .map((chat) => ({
+        ...chat,
+        ownerUid: chat.ownerUid || uid,
+        messages: Array.isArray(chat.messages) ? chat.messages : [],
+      }))
+      .filter((chat) => (chat.ownerUid || uid) === uid);
+  }
 
   function syncActiveView(next, mode = "replace") {
     if (typeof window !== "undefined") {
@@ -1101,25 +1215,62 @@ export default function NewChatLanding({
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chats));
-    } catch {
-      // no-op
-    }
-  }, [chats]);
+    const unsubscribe = auth?.onAuthStateChanged
+      ? auth.onAuthStateChanged((firebaseUser) => {
+      const newUid = firebaseUser?.uid || null;
+      const previousUid = previousUidRef.current;
+
+      if (previousUid && previousUid !== newUid) {
+        clearSessionUiState();
+      }
+
+      previousUidRef.current = newUid;
+      setCurrentUid(newUid);
+      })
+      : () => {};
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    if (activeChatId && chats.some((chat) => chat.id === activeChatId)) return;
-    setActiveChatId(chats[0]?.id || "");
-  }, [activeChatId, chats]);
+    if (!currentUid) {
+      clearSessionUiState();
+      return;
+    }
+
+    const savedChats = readScopedJson(currentUid, "institution_chats", []);
+    const savedActiveChatId = readScopedJson(currentUid, "institution_active_chat", null);
+    const ownedChats = normalizeOwnedChats(savedChats, currentUid);
+
+    const nextChats =
+      ownedChats.length > 0
+        ? ownedChats
+        : [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage, currentUid)];
+
+    setChats(nextChats);
+    setActiveChatId(
+      nextChats.some((chat) => chat.id === savedActiveChatId)
+        ? savedActiveChatId
+        : nextChats[0]?.id || null
+    );
+  }, [currentUid, defaultAssistantMessage]);
 
   useEffect(() => {
-    try {
-      if (activeChatId) localStorage.setItem(CHAT_ACTIVE_KEY, activeChatId);
-    } catch {
-      // no-op
-    }
-  }, [activeChatId]);
+    if (!currentUid) return;
+    const ownedChats = normalizeOwnedChats(chats, currentUid);
+    writeScopedJson(currentUid, "institution_chats", ownedChats);
+  }, [currentUid, chats]);
+
+  useEffect(() => {
+    const ownedChats = normalizeOwnedChats(chats, currentUid);
+    if (activeChatId && ownedChats.some((chat) => chat.id === activeChatId)) return;
+    setActiveChatId(ownedChats[0]?.id || null);
+  }, [activeChatId, chats, currentUid]);
+
+  useEffect(() => {
+    if (!currentUid) return;
+    writeScopedJson(currentUid, "institution_active_chat", activeChatId);
+  }, [currentUid, activeChatId]);
 
   useEffect(() => {
     if (!isNewChatMenuOpen) return;
@@ -1167,8 +1318,9 @@ export default function NewChatLanding({
     "departmentadmin",
     "superadmin",
   ].includes(String(userRole || "").toLowerCase());
-  const isDevAdminBypass = Boolean(import.meta.env.DEV);
-  const canShowAdmin = isAdminRole || isDevAdminBypass;
+  // TEMP FLAG — set to false later when role security is restored.
+  const FORCE_SHOW_ADMIN = true;
+  const canShowAdmin = FORCE_SHOW_ADMIN || import.meta.env.DEV || isAdminRole;
   const moreItems = useMemo(() => {
     if (!canShowAdmin) return MORE_ITEMS_BASE;
     return [...MORE_ITEMS_BASE, { key: "admin", label: "Admin", icon: Shield }];
@@ -1183,8 +1335,8 @@ export default function NewChatLanding({
         email: firebaseUser?.email || "student@elimulink.co.ke",
         phone: "+2547xx xxx xxx",
         avatarUrl: "",
-      }),
-    [active, profileName, firebaseUser]
+      }, currentUid),
+    [active, profileName, firebaseUser, currentUid]
   );
   const settingsPrefs = useMemo(
     () =>
@@ -1192,8 +1344,8 @@ export default function NewChatLanding({
         muteNotifications: false,
         keyboardShortcuts: false,
         language: "en-KE",
-      }),
-    [active]
+      }, currentUid),
+    [active, currentUid]
   );
 
   const user = useMemo(
@@ -1243,7 +1395,9 @@ export default function NewChatLanding({
 
   const activePlaceholder = placeholderConfig[active];
 
-  const activeChat = chats.find((chat) => chat.id === activeChatId) || chats[0];
+  const safeChats = normalizeOwnedChats(chats, currentUid);
+  const activeChat =
+    safeChats.find((chat) => chat.id === activeChatId) || safeChats[0] || null;
   const messages = activeChat?.messages || [];
   const resolveMessageTimestamp = (message, idx) => {
     if (message?.createdAt) return Number(message.createdAt);
@@ -1498,10 +1652,6 @@ export default function NewChatLanding({
     setIsMobileDrawerOpen(false);
     setIsMobileMoreOpen(false);
     setIsMorePopupOpen(false);
-    if (typeof onOpenAdmin === "function") {
-      onOpenAdmin();
-      return;
-    }
     syncActiveView("admin", "push");
   }
 
@@ -1558,6 +1708,7 @@ export default function NewChatLanding({
   }
 
   async function handleLogout() {
+    clearSessionUiState();
     setIsProfileMenuOpen(false);
     setIsProfileSheetOpen(false);
     try {
@@ -1574,7 +1725,7 @@ export default function NewChatLanding({
   }
 
   function startNewChat() {
-    const next = createDefaultChat(nextUntitledChatTitle(chats), "");
+    const next = createDefaultChat(nextUntitledChatTitle(chats), "", currentUid);
     setChats((prev) => [next, ...prev]);
     setActiveChatId(next.id);
     setContextByChat((prev) => ({ ...prev, [next.id]: { ...EMPTY_ACADEMIC_CONTEXT } }));
@@ -1596,7 +1747,7 @@ export default function NewChatLanding({
     setChats((prev) => {
       const filtered = prev.filter((chat) => chat.id !== chatId);
       if (filtered.length === 0) {
-        const fallback = createDefaultChat(UNTITLED_CHAT_BASE, "");
+        const fallback = createDefaultChat(UNTITLED_CHAT_BASE, "", currentUid);
         setActiveChatId(fallback.id);
         return [fallback];
       }
@@ -1776,7 +1927,10 @@ export default function NewChatLanding({
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       updateActiveChatMessages(
-        (m) => [...m, { role: "assistant", text: "Microphone is not supported in this browser." }],
+        (m) => [
+          ...m,
+          { role: "assistant", text: "Microphone is not supported in this browser.", ownerUid: currentUid, createdAt: Date.now() },
+        ],
         "Microphone support"
       );
       return;
@@ -1825,7 +1979,7 @@ export default function NewChatLanding({
   function appendAssistantPlaceholder(streamId) {
     const now = Date.now();
     updateActiveChatMessages(
-      (m) => [...m, { role: "assistant", text: "", streaming: true, streamId, createdAt: now }],
+      (m) => [...m, { role: "assistant", text: "", streaming: true, streamId, ownerUid: currentUid, createdAt: now }],
       "Reply"
     );
   }
@@ -1837,7 +1991,7 @@ export default function NewChatLanding({
       const next = [...m];
       const current = next[idx];
       const nextText = updater(String(current?.text || ""));
-      next[idx] = { ...current, text: nextText, streaming: true };
+      next[idx] = { ...current, text: nextText, streaming: true, ownerUid: currentUid };
       return next;
     }, "Reply");
   }
@@ -1845,10 +1999,10 @@ export default function NewChatLanding({
   function finalizeStreamingAssistant(streamId, text) {
     updateActiveChatMessages((m) => {
       const idx = m.findIndex((item) => item?.streamId === streamId);
-      if (idx < 0) return [...m, { role: "assistant", text, createdAt: Date.now() }];
+      if (idx < 0) return [...m, { role: "assistant", text, ownerUid: currentUid, createdAt: Date.now() }];
       const next = [...m];
       const current = next[idx] || {};
-      next[idx] = { role: "assistant", text, createdAt: current.createdAt || Date.now() };
+      next[idx] = { role: "assistant", text, ownerUid: currentUid, createdAt: current.createdAt || Date.now() };
       return next;
     }, "Reply");
   }
@@ -1869,8 +2023,18 @@ export default function NewChatLanding({
       },
       body: JSON.stringify({
         message: withAcademicContext(messageText, academicContext),
+        mode: resolvedChatMode,
+        workspaceContext,
+        context: {
+          mode: resolvedChatMode,
+          workspace: workspaceContext || null,
+        },
         preferredLanguage: String(settingsPrefs?.language || "en-KE"),
-        metadata: { academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT },
+        metadata: {
+          academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT,
+          mode: resolvedChatMode,
+          workspaceContext: workspaceContext || null,
+        },
       }),
     });
 
@@ -1906,8 +2070,18 @@ export default function NewChatLanding({
       },
       body: JSON.stringify({
         message: withAcademicContext(messageText, academicContext),
+        mode: resolvedChatMode,
+        workspaceContext,
+        context: {
+          mode: resolvedChatMode,
+          workspace: workspaceContext || null,
+        },
         preferredLanguage: String(settingsPrefs?.language || "en-KE"),
-        metadata: { academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT },
+        metadata: {
+          academicContext: academicContext || EMPTY_ACADEMIC_CONTEXT,
+          mode: resolvedChatMode,
+          workspaceContext: workspaceContext || null,
+        },
       }),
     });
 
@@ -2000,7 +2174,7 @@ export default function NewChatLanding({
     }
 
     updateActiveChatMessages(
-      (m) => [...m, { role: "user", text: messageText }],
+      (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now() }],
       clean || "New Chat"
     );
     if (clean) setLastPrompt(clean);
@@ -2015,7 +2189,7 @@ export default function NewChatLanding({
       const token = await auth?.currentUser?.getIdToken(true).catch(() => null);
       if (!token) {
         updateActiveChatMessages(
-          (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat." }],
+          (m) => [...m, { role: "assistant", text: "Please sign in to use AI chat.", ownerUid: currentUid, createdAt: Date.now() }],
           clean || "Sign in"
         );
         return;
@@ -2057,7 +2231,7 @@ export default function NewChatLanding({
         finalizeStreamingAssistant(streamId, errorText);
       } else {
         updateActiveChatMessages(
-          (m) => [...m, { role: "assistant", text: errorText }],
+          (m) => [...m, { role: "assistant", text: errorText, ownerUid: currentUid, createdAt: Date.now() }],
           clean || "Request failed"
         );
       }
@@ -2077,8 +2251,8 @@ export default function NewChatLanding({
   }
 
   function resolveTtsLang() {
-    const storedPrefs = getStoredPreferences({});
-    const storedLang = localStorage.getItem("elimulink_language");
+    const storedPrefs = getStoredPreferences({}, currentUid);
+    const storedLang = readScopedJson(currentUid, "language", null);
     const rawLang =
       settingsPrefs?.language ||
       storedPrefs?.language ||
@@ -2289,6 +2463,10 @@ export default function NewChatLanding({
 
   if (active === "results") {
     return <ResultsPage />;
+  }
+
+  if (active === "admin") {
+    return <AdminAnalyticsLanding />;
   }
 
   return (
@@ -3266,17 +3444,17 @@ export default function NewChatLanding({
                   <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-4 py-4 shadow-[0_6px_20px_rgba(15,23,42,0.04)]">
                     <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
                     <div className="text-[28px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
-                      Hi {firstNameOf(user.name)}, where should we start?
+                      {modeConfig.title}
                     </div>
                     <div className="text-sm leading-relaxed text-slate-600 mt-2">
-                      Ask anything about coursework, assignments, revision, research, or coding.
+                      {modeConfig.subtitle}
                     </div>
                   </div>
                 ) : null}
 
                 {messages.length === 0 ? (
                   <div className="flex flex-wrap items-start gap-1.5 pt-1 pb-2">
-                    {ACADEMIC_STARTERS.map((starter) => {
+                    {starterSet.map((starter) => {
                       const isActive = selectedStarter === starter.key;
                       return (
                         <button
@@ -3575,10 +3753,10 @@ export default function NewChatLanding({
                   <div className="rounded-3xl bg-white/95 border border-slate-200/80 px-5 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="text-[12px] font-medium tracking-[0.01em] text-slate-500">{timeGreeting()}</div>
                     <div className="text-[30px] leading-[1.2] font-semibold text-slate-900 mt-1.5">
-                      Hi {firstNameOf(user.name)}, where should we start?
+                      {modeConfig.title}
                     </div>
                     <div className="text-sm leading-relaxed text-slate-600 mt-2">
-                      Ask anything about coursework, assignments, revision, research, or coding.
+                      {modeConfig.subtitle}
                     </div>
                   </div>
                 ) : null}
@@ -3629,7 +3807,7 @@ export default function NewChatLanding({
 
               {messages.length === 0 ? (
                 <div className="mt-3 flex flex-wrap items-start gap-1.5 shrink-0 max-w-[760px] w-full mx-auto">
-                  {ACADEMIC_STARTERS.map((starter) => {
+                  {starterSet.map((starter) => {
                     const isActive = selectedStarter === starter.key;
                     return (
                       <button
