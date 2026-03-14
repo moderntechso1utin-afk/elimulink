@@ -7,6 +7,11 @@ function detectModeFromHost() {
 }
 
 export function getApiBase() {
+  if (import.meta.env.DEV) {
+    // In local dev, use same-origin `/api` and let Vite proxy forward to backend.
+    // This avoids CORS issues for app.localhost/student.localhost/institution.localhost.
+    return "";
+  }
   const envBase = (import.meta.env.VITE_API_BASE || "").trim();
   const normalized = envBase.replace(/\/$/, "");
   if (!normalized || normalized.includes(":4000")) {

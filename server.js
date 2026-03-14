@@ -1277,6 +1277,262 @@ app.post('/api/auth/post-login-sync', requireFirebaseAuth, async (req, res) => {
   }
 });
 
+function normalizeActivationRole(rawRole) {
+  const value = String(rawRole || '').trim();
+  if (!value) return 'staff';
+  return value;
+}
+
+function normalizeActivationKey(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function hashActivationKey(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
+}
+
+function isActivationKeyInactive(payload = {}) {
+  if (payload.isActive === false) return true;
+  const status = String(payload.status || '').toLowerCase();
+  return status === 'revoked' || status === 'disabled' || status === 'inactive';
+}
+
+function isActivationKeyUsed(payload = {}) {
+  if (payload.usedAt || payload.usedByUid || payload.consumed === true) return true;
+  const status = String(payload.status || '').toLowerCase();
+  return status === 'used' || status === 'redeemed' || status === 'completed';
+}
+
+function isActivationKeyExpired(payload = {}) {
+  const raw = payload.expiresAt;
+  if (!raw) return false;
+  const expiresMs =
+    typeof raw?.toMillis === 'function'
+      ? raw.toMillis()
+      : typeof raw?.seconds === 'number'
+        ? raw.seconds * 1000
+        : typeof raw?._seconds === 'number'
+          ? raw._seconds * 1000
+          : Date.parse(String(raw));
+  if (!Number.isFinite(expiresMs)) return false;
+  return Date.now() > expiresMs;
+}
+
+async function findActivationKeyByInput(accessKey) {
+  const key = normalizeActivationKey(accessKey);
+  if (!key) return null;
+
+  const keyHash = hashActivationKey(key);
+  const byHash = await db
+    .collection('artifacts')
+    .doc(APP_ID)
+    .collection('adminActivationKeys')
+    .where('keyHash', '==', keyHash)
+    .limit(1)
+    .get();
+  if (!byHash.empty) return byHash.docs[0];
+
+  // Legacy/plaintext fallback for previously-seeded docs.
+  const byPlain = await db
+    .collection('artifacts')
+    .doc(APP_ID)
+    .collection('adminActivationKeys')
+    .where('key', '==', key)
+    .limit(1)
+    .get();
+  if (!byPlain.empty) return byPlain.docs[0];
+
+  return null;
+}
+
+app.post('/api/auth/redeem-admin-key', async (req, res) => {
+  try {
+    const { accessKey } = req.body || {};
+    if (!accessKey) return res.status(400).json({ error: 'accessKey is required' });
+    if (!db) return res.status(500).json({ error: 'Firestore not initialized on backend' });
+    if (!admin.apps?.length) return res.status(500).json({ error: 'Firebase Admin not configured' });
+    if (!ADMIN_JWT_SECRET) return res.status(500).json({ error: 'ADMIN_JWT_SECRET not configured' });
+
+    const keyDoc = await findActivationKeyByInput(accessKey);
+    if (!keyDoc?.exists) return res.status(404).json({ error: 'Invalid activation key' });
+
+    const redeemed = await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(keyDoc.ref);
+      if (!freshSnap.exists) throw httpError(404, 'Invalid activation key');
+      const data = freshSnap.data() || {};
+
+      if (isActivationKeyInactive(data)) throw httpError(403, 'Activation key is inactive');
+      if (isActivationKeyUsed(data)) throw httpError(409, 'Activation key already used');
+      if (isActivationKeyExpired(data)) throw httpError(410, 'Activation key expired');
+
+      const activationNonce = crypto.randomBytes(16).toString('hex');
+      tx.set(
+        keyDoc.ref,
+        {
+          status: 'redeemed',
+          redeemedAt: admin.firestore.FieldValue.serverTimestamp(),
+          usedAt: admin.firestore.FieldValue.serverTimestamp(),
+          consumed: true,
+          activationNonce,
+          activationExpiresAt: admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 60 * 1000),
+        },
+        { merge: true },
+      );
+
+      return {
+        keyId: freshSnap.id,
+        activationNonce,
+        institutionId: data.institutionId || null,
+        institutionName: data.institutionName || null,
+        departmentId: data.departmentId || null,
+        departmentName: data.departmentName || null,
+        role: normalizeActivationRole(data.role),
+        email: normalizeEmail(data.email),
+        fullName: String(data.fullName || data.displayName || '').trim() || null,
+      };
+    });
+
+    if (!redeemed.email) {
+      return res.status(500).json({ error: 'Activation key is missing email identity' });
+    }
+
+    const activationToken = jwt.sign(
+      {
+        type: 'admin_activation',
+        keyId: redeemed.keyId,
+        activationNonce: redeemed.activationNonce,
+        email: redeemed.email,
+        institutionId: redeemed.institutionId,
+        departmentId: redeemed.departmentId,
+        role: redeemed.role,
+      },
+      ADMIN_JWT_SECRET,
+      { expiresIn: '30m' },
+    );
+
+    return res.json({
+      ok: true,
+      activationToken,
+      activation: {
+        institutionId: redeemed.institutionId,
+        institutionName: redeemed.institutionName,
+        departmentId: redeemed.departmentId,
+        departmentName: redeemed.departmentName,
+        role: redeemed.role,
+        email: redeemed.email,
+        fullName: redeemed.fullName,
+      },
+    });
+  } catch (err) {
+    const status = err?.status || 500;
+    console.error('POST /api/auth/redeem-admin-key error:', err);
+    return res.status(status).json({ error: err?.message || 'Server error' });
+  }
+});
+
+app.post('/api/auth/complete-admin-activation', async (req, res) => {
+  try {
+    const { activationToken, password, fullName } = req.body || {};
+    if (!activationToken) return res.status(400).json({ error: 'activationToken is required' });
+    if (!password || String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    if (!db) return res.status(500).json({ error: 'Firestore not initialized on backend' });
+    if (!admin.apps?.length) return res.status(500).json({ error: 'Firebase Admin not configured' });
+    if (!ADMIN_JWT_SECRET) return res.status(500).json({ error: 'ADMIN_JWT_SECRET not configured' });
+
+    let payload;
+    try {
+      payload = jwt.verify(activationToken, ADMIN_JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired activation token' });
+    }
+
+    if (payload?.type !== 'admin_activation' || !payload?.keyId || !payload?.activationNonce) {
+      return res.status(400).json({ error: 'Invalid activation token payload' });
+    }
+
+    const keyRef = db
+      .collection('artifacts')
+      .doc(APP_ID)
+      .collection('adminActivationKeys')
+      .doc(String(payload.keyId));
+    const keySnap = await keyRef.get();
+    if (!keySnap.exists) return res.status(404).json({ error: 'Activation key record not found' });
+    const keyData = keySnap.data() || {};
+
+    if (keyData.activationNonce !== payload.activationNonce) {
+      return res.status(403).json({ error: 'Activation token no longer valid' });
+    }
+    if (String(keyData.status || '').toLowerCase() === 'completed' || keyData.activationCompletedAt) {
+      return res.status(409).json({ error: 'Activation already completed' });
+    }
+    if (isActivationKeyExpired({ expiresAt: keyData.activationExpiresAt })) {
+      return res.status(410).json({ error: 'Activation token expired' });
+    }
+
+    const email = normalizeEmail(payload.email || keyData.email);
+    if (!email) return res.status(500).json({ error: 'Activation identity email missing' });
+
+    let existingUser = null;
+    try {
+      existingUser = await admin.auth().getUserByEmail(email);
+    } catch (err) {
+      if (err?.code !== 'auth/user-not-found') {
+        throw err;
+      }
+    }
+    if (existingUser) {
+      return res.status(409).json({ error: 'Account already exists. Continue with normal login.' });
+    }
+
+    const displayName = String(fullName || keyData.fullName || payload.fullName || '').trim() || null;
+    const created = await admin.auth().createUser({
+      email,
+      password: String(password),
+      ...(displayName ? { displayName } : {}),
+    });
+
+    const institutionId = keyData.institutionId || payload.institutionId || null;
+    const role = normalizeActivationRole(keyData.role || payload.role);
+    const departmentId = keyData.departmentId || payload.departmentId || null;
+    await db.doc(`artifacts/${APP_ID}/users/${created.uid}`).set(
+      {
+        email,
+        role,
+        institutionId,
+        departmentId,
+        displayName: displayName || null,
+        name: displayName || null,
+        staffCodeVerified: true,
+        activatedFromKeyId: keySnap.id,
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    await keyRef.set(
+      {
+        status: 'completed',
+        activationCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+        usedByUid: created.uid,
+        usedByEmail: email,
+      },
+      { merge: true },
+    );
+
+    return res.json({
+      ok: true,
+      message: 'Activation completed. Use your email and password to sign in.',
+      email,
+      role,
+      institutionId,
+      departmentId,
+    });
+  } catch (err) {
+    console.error('POST /api/auth/complete-admin-activation error:', err);
+    return res.status(err?.status || 500).json({ error: err?.message || 'Server error' });
+  }
+});
+
 app.post('/api/auth/verify-staff-code', requireFirebaseAuth, async (req, res) => {
   try {
     const { staffCode } = req.body || {};

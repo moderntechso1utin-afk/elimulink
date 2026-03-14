@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import NewChatLanding from "../pages/NewChatLanding";
 import AdminAnalyticsLanding from "../pages/AdminAnalyticsLanding";
+import { auth, db, appId } from "../lib/firebase";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
 
 const INSTITUTION_HISTORY_KEY = "institutionMode";
 
@@ -11,6 +13,50 @@ function resolveModeFromHistory() {
 
 export default function InstitutionApp({ userRole }) {
   const [mode, setMode] = useState(() => resolveModeFromHistory()); // institution | admin
+  const [adminCheckPending, setAdminCheckPending] = useState(false);
+
+  async function resolveCurrentInstitutionId() {
+    const uid = auth?.currentUser?.uid;
+    if (!uid || !db) return null;
+    try {
+      const userSnap = await getDoc(doc(db, "artifacts", appId, "users", uid));
+      if (!userSnap.exists()) return null;
+      const profile = userSnap.data() || {};
+      return profile.institutionId || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function institutionHasActivatedAdmin(institutionId) {
+    if (!institutionId || !db) return false;
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "artifacts", appId, "users"),
+          where("institutionId", "==", institutionId),
+          limit(200),
+        ),
+      );
+      if (snap.empty) return false;
+      return snap.docs.some((docSnap) => {
+        const data = docSnap.data() || {};
+        const role = String(data.role || "").toLowerCase();
+        return Boolean(
+          data.activatedFromKeyId ||
+            data.staffCodeVerified === true ||
+            role === "institution_admin" ||
+            role === "department_head" ||
+            role === "departmentadmin" ||
+            role === "staff" ||
+            role === "admin" ||
+            role === "superadmin",
+        );
+      });
+    } catch {
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -32,16 +78,23 @@ export default function InstitutionApp({ userRole }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  function openAdmin() {
-    if (typeof window !== "undefined") {
-      const currentState = window.history.state || {};
-      window.history.pushState(
-        { ...currentState, [INSTITUTION_HISTORY_KEY]: "admin" },
-        "",
-        window.location.href
-      );
+  async function openAdmin() {
+    if (adminCheckPending) return;
+    setAdminCheckPending(true);
+    try {
+      const institutionId = await resolveCurrentInstitutionId();
+      const hasActivatedAdmin = await institutionHasActivatedAdmin(institutionId);
+
+      if (!hasActivatedAdmin) {
+        window.history.pushState({}, "", "/institution/activate");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        return;
+      }
+
+      window.location.assign("/institution");
+    } finally {
+      setAdminCheckPending(false);
     }
-    setMode("admin");
   }
 
   return mode === "admin" ? (

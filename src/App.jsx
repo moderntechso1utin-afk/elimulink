@@ -12,6 +12,15 @@ import {
   Gem, 
   Settings, 
   HelpCircle, 
+  MessageSquare,
+  FileText,
+  Activity,
+  Presentation,
+  Video,
+  Calendar,
+  Bell,
+  Home,
+  LogOut,
   Menu, 
   Send, 
   Volume2, 
@@ -1143,6 +1152,21 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
     </button>
   );
 
+  const ExecutiveSidebarItem = ({ icon: Icon, label, onClick, active = false }) => (
+    <button
+      onClick={() => {
+        onClick && onClick();
+        if (isMobile) setSidebarOpen(false);
+      }}
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition text-sm ${
+        active ? 'bg-blue-600 text-white' : 'text-gray-200 hover:bg-slate-800'
+      }`}
+    >
+      <Icon size={18} />
+      <span>{label}</span>
+    </button>
+  );
+
   // Student capability booleans
   const isStudent = ['student', 'student_general', 'institution_student'].includes(userRole);
   const studentScope = userProfile?.studentScope ?? 'general';
@@ -1357,7 +1381,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
         className={
           isMobile
             ? `fixed top-0 left-0 z-40 h-full w-full max-w-xs bg-slate-900 border-r border-white/5 flex flex-col min-w-0 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
-            : `w-64 bg-slate-900 border-r border-white/5 flex flex-col shrink-0 min-w-0`
+            : `w-[260px] bg-slate-900 border-r border-white/5 flex flex-col shrink-0 min-w-0`
         }
         style={isMobile ? { boxShadow: isSidebarOpen ? '0 0 0 9999px rgba(0,0,0,0.5)' : undefined } : {}}
       >
@@ -1372,7 +1396,7 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
             }}
           >
             <div className="w-6 h-6 bg-sky-500 rounded flex items-center justify-center text-white text-[10px]">EL</div>
-            ElimuLink — {roleTitle}
+            {isInstitutionHost ? `ElimuLink — ${roleTitle}` : 'ElimuLink Executive'}
           </div>
           <div className="text-[11px] text-slate-400">
             {userRole === 'student' && 'Your academic tools are ready.'}
@@ -1419,79 +1443,50 @@ export default function App({ hostMode = 'public', modeUrls = null }) {
             </>
           ) : (
             <>
-              <SidebarItem icon={Plus} label="New Chat" onClick={() => { setMessages([]); setActiveChatId(null); }} />
-              <SidebarItem icon={FolderHeart} label="My Stuff" onClick={() => { setShowMyStuff(!showMyStuff); }} />
-              <SidebarItem icon={Gem} label="Services Hub" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
-              <SidebarItem icon={FolderHeart} label="Portal" onClick={handlePortalClick} />
-              <div className="px-3 pt-2 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Switch Experience</div>
-              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.public}>Public</a>
-              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.student}>Student</a>
-              <a className="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-white/5" href={resolvedModeUrls.institution}>Institution</a>
-              {isInstitutionLinkedUser && (
-                <SidebarItem icon={FolderHeart} label={userRole === 'institution' ? 'Institution' : 'Admin'} onClick={() => { setShowAdmin(s=>!s); }} />
-              )}
-              {isStudent && (
-                <>
-                  <SidebarItem icon={FolderHeart} label="Learn" onClick={() => {}} />
-                  <SidebarItem icon={FolderHeart} label="Assignments" onClick={() => {}} />
-                </>
-              )}
-              {isInstitutionVerified && (
-                <>
-                  <SidebarItem icon={FolderHeart} label="Library" onClick={() => {}} />
-                  <SidebarItem icon={FolderHeart} label="Departments" onClick={() => {}} />
-                </>
-              )}
-              <div className="mt-6 mb-2 px-3 text-[10px] uppercase text-slate-500 font-bold tracking-widest">Recent Chats</div>
-              <div className="mt-2">
-                <button
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg text-sm transition-colors ${
-                    isStaffRole ? 'text-sky-400 hover:bg-white/5' : 'text-slate-400 hover:bg-white/5'
-                  }`}
-                  onClick={() => {
-                    if (isStaffRole) setInstitutionExpanded(v => !v);
-                    else setShowInstitutionModal(true);
-                  }}
-                >
-                  <FolderHeart size={18} />
-                  <span>Institution</span>
-                  {!isStaffRole && <Lock size={16} className="ml-1" />}
-                  {isStaffRole && (
-                    institutionExpanded ? <ChevronUp size={16} className="ml-auto" /> : <ChevronDown size={16} className="ml-auto" />
-                  )}
-                </button>
-
-                {isStaffRole && institutionExpanded && (
-                  <div className="ml-6 mt-1 space-y-1">
-                    {institutionDepartments.length === 0 && (
-                      <div className="text-xs text-slate-500">No departments</div>
-                    )}
-                    {institutionDepartments.map(dep => (
-                      <button
-                        key={dep.id}
-                        className={`w-full text-left px-2 py-1 rounded text-xs ${
-                          activeDepartmentId === dep.id ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-sky-900/30'
-                        }`}
-                        onClick={() => handleDepartmentSelect(dep)}
-                      >
-                        {dep.name || dep.id}
-                      </button>
-                    ))}
+              <div className="space-y-6 px-1 py-2">
+                <div>
+                  <p className="px-2 pb-2 text-xs text-gray-400 uppercase">AI Workspace</p>
+                  <div className="space-y-1">
+                    <ExecutiveSidebarItem icon={MessageSquare} label="New Chat" active onClick={() => { setMessages([]); setActiveChatId(null); }} />
+                    <ExecutiveSidebarItem icon={FileText} label="My Notes" onClick={() => { setShowMyStuff(!showMyStuff); }} />
+                    <ExecutiveSidebarItem icon={Activity} label="My Activity" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
+                    <ExecutiveSidebarItem icon={Presentation} label="Presentation Requests" onClick={() => { setShowServicesHub(true); setShowMyStuff(false); setShowAdmin(false); }} />
                   </div>
-                )}
+                </div>
+
+                <div>
+                  <p className="px-2 pb-2 text-xs text-gray-400 uppercase">Communication</p>
+                  <div className="space-y-1">
+                    <ExecutiveSidebarItem icon={Video} label="Meet" onClick={() => {}} />
+                    <ExecutiveSidebarItem icon={Calendar} label="Calendar" onClick={() => {}} />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="px-2 pb-2 text-xs text-gray-400 uppercase">Account</p>
+                  <div className="space-y-1">
+                    <ExecutiveSidebarItem icon={Settings} label="Settings & Profile" onClick={() => setIsSettingsOpen(true)} />
+                    <ExecutiveSidebarItem icon={Bell} label="Notifications" onClick={() => {}} />
+                    <ExecutiveSidebarItem icon={Home} label="Institution Snapshot" onClick={handlePortalClick} />
+                  </div>
+                </div>
               </div>
-              {chatHistory.slice(0, 5).map(chat => (
-                <button key={chat.id} onClick={() => { setActiveChatId(chat.id); setMessages(chat.messages || []); }} className="w-full text-left p-2 rounded text-xs truncate text-slate-400 hover:bg-white/5">
-                  {chat.title || "Previous Chat"}
-                </button>
-              ))}
             </>
           )}
         </div>
 
-        <div className="p-2 border-t border-white/5">
-          <SidebarItem icon={Settings} label="Settings" onClick={() => setIsSettingsOpen(true)} />
-          <SidebarItem icon={HelpCircle} label="Help" onClick={() => {}} />
+        <div className="p-3 border-t border-slate-800 space-y-1">
+          {isInstitutionHost ? (
+            <>
+              <SidebarItem icon={Settings} label="Settings" onClick={() => setIsSettingsOpen(true)} />
+              <SidebarItem icon={HelpCircle} label="Help" onClick={() => {}} />
+            </>
+          ) : (
+            <>
+              <ExecutiveSidebarItem icon={HelpCircle} label="Help" onClick={() => {}} />
+              <ExecutiveSidebarItem icon={LogOut} label="Logout" onClick={handleLogout} />
+            </>
+          )}
         </div>
       </aside>
 

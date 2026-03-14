@@ -15,6 +15,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import App from '../App.jsx';
 import InstitutionApp from '../institution/InstitutionApp.jsx';
 import StudentApp from '../student/StudentApp.jsx';
+import InstitutionActivatePage from '../pages/InstitutionActivatePage.jsx';
 import { auth, db, firebaseInitErrorMessage } from '../lib/firebase';
 import { apiUrl } from '../lib/apiUrl';
 import { getResolvedHostMode } from './hostMode';
@@ -366,6 +367,15 @@ function LoginPage({
             Forgot password?
           </button>
         ) : null}
+        {hostMode === 'institution' ? (
+          <button
+            className="mt-2 w-full text-xs text-slate-300 underline"
+            type="button"
+            onClick={() => navigate('/institution/activate')}
+          >
+            First-time staff/admin activation
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -541,8 +551,14 @@ export default function HostRouter() {
     }
 
     if ((hostMode === 'student' || hostMode === 'institution') && !loggedIn) {
+      if (hostMode === 'institution' && pathname === '/institution/activate') {
+        handledInitialRedirect.current = true;
+        return;
+      }
       if (pathname !== '/login') {
-        const rawTarget = pathname === '/onboarding' ? '/onboarding' : `${window.location.pathname}${window.location.search || ''}`;
+        const rawTarget = pathname === '/onboarding'
+          ? '/onboarding'
+          : `${window.location.pathname}${window.location.search || ''}`;
         const returnTo = encodeURIComponent(sanitizeReturnTo(rawTarget, { mode: hostMode, isAuthenticated: false }));
         const target = `/login?returnTo=${returnTo}`;
         hostLog("[REDIRECT]", { from: pathname, to: target });
@@ -566,7 +582,7 @@ export default function HostRouter() {
       return;
     }
 
-    if (loggedIn && profileDone && (pathname === '/login' || pathname === '/onboarding')) {
+    if (loggedIn && profileDone && (pathname === '/login' || pathname === '/onboarding' || pathname === '/institution/activate')) {
       const params = new URLSearchParams(window.location.search);
       const returnTo = params.get('returnTo') || '';
       const target = resolvePostAuthTarget(profile, returnTo);
@@ -576,7 +592,12 @@ export default function HostRouter() {
       return;
     }
 
-    if (!pathname.startsWith(expectedPrefix) && pathname !== '/login' && pathname !== '/onboarding') {
+    if (
+      !pathname.startsWith(expectedPrefix) &&
+      pathname !== '/login' &&
+      pathname !== '/onboarding' &&
+      pathname !== '/institution/activate'
+    ) {
       replacePath(expectedPrefix, setPathname);
       handledInitialRedirect.current = true;
       return;
@@ -629,8 +650,17 @@ export default function HostRouter() {
 
   if (!authReady || !profileReady) return <LoadingScreen />;
 
-  if ((hostMode === 'student' || hostMode === 'institution') && (!user || user.isAnonymous) && pathname !== '/login') {
+  if (
+    (hostMode === 'student' || hostMode === 'institution') &&
+    (!user || user.isAnonymous) &&
+    pathname !== '/login' &&
+    pathname !== '/institution/activate'
+  ) {
     return <LoadingScreen />;
+  }
+
+  if (hostMode === 'institution' && pathname === '/institution/activate') {
+    return <InstitutionActivatePage />;
   }
 
   if (pathname === '/login' || pathname === '/onboarding') {

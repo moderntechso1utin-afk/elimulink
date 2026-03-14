@@ -163,42 +163,42 @@ const CHAT_MODE_CONFIG = {
   },
 
   admin: {
-    title: "Welcome to the ElimuLink Administrative Assistant.",
+    title: "ElimuLink Institution Intelligence Workspace",
     subtitle:
-      "Ask about workflows, results, attendance, announcements, compliance, or department operations.",
+      "Review operations, workflows, results readiness, attendance risk, subgroup activity, and institutional priorities.",
     starters: [
       {
         key: "workflow_review",
-        label: "Workflow review",
+        label: "Workflow status",
         emoji: "🗂️",
-        prefill: "Summarize the current workflow situation...",
+        prefill: "Review institutional workflow status...",
         suggestions: [
           "Show me pending approvals",
-          "Summarize workflows needing attention",
-          "Which issues are blocked right now?",
+          "Summarize workflow bottlenecks across departments",
+          "Which operational items are blocked right now?",
           "Give me today's workflow snapshot",
         ],
       },
       {
         key: "results_oversight",
-        label: "Results oversight",
+        label: "Results readiness",
         emoji: "📘",
-        prefill: "Help me review academic results activity...",
+        prefill: "Analyze result publication readiness...",
         suggestions: [
-          "Summarize missing marks issues",
-          "Show result risks needing review",
+          "Summarize missing marks and approval blockers",
+          "Show risks before results publication",
           "Explain the current approval queue",
-          "Generate a results oversight summary",
+          "Generate a results readiness summary",
         ],
       },
       {
         key: "attendance_alerts",
         label: "Attendance alerts",
         emoji: "📊",
-        prefill: "Analyze attendance patterns...",
+        prefill: "Summarize attendance anomalies...",
         suggestions: [
-          "Show attendance risks by subgroup",
-          "Which classes have low participation?",
+          "Show attendance anomalies by subgroup",
+          "Which classes show sustained low participation?",
           "Summarize attendance concerns",
           "Generate an attendance alert summary",
         ],
@@ -229,12 +229,13 @@ const CHAT_MODE_CONFIG = {
       },
       {
         key: "department_report",
-        label: "Department report",
+        label: "Operations summary",
         emoji: "🧠",
-        prefill: "Generate a department performance summary...",
+        prefill: "Show subgroup activity summary and pending operational items...",
         suggestions: [
           "Create a weekly department summary",
-          "Summarize staff and lecturer activity",
+          "Summarize subgroup activity for this week",
+          "Review pending operational items by urgency",
           "Highlight operational risks",
           "Draft a board-ready department report",
         ],
@@ -297,7 +298,7 @@ function buildWelcomeMessage(name) {
 
 function getDefaultAssistantMessage(mode = "student", name = "Scholar") {
   if (mode === "admin") {
-    return "Welcome to the ElimuLink Administrative Assistant. I can help with workflows, analytics, reports, results, attendance, and department operations.";
+    return "Welcome to the ElimuLink Institution Administrative Assistant. I can help with workflow status, attendance anomalies, results readiness, subgroup operations, and institutional summaries.";
   }
   return buildWelcomeMessage(name);
 }
@@ -306,19 +307,24 @@ function makeChatId() {
   return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function isUntitledChatTitle(title) {
-  return /^New Chat(?: \d+)?$/i.test(String(title || "").trim());
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function nextUntitledChatTitle(chats = []) {
+function isUntitledChatTitle(title, base = UNTITLED_CHAT_BASE) {
+  const pattern = new RegExp(`^${escapeRegex(base)}(?: \\d+)?$`, "i");
+  return pattern.test(String(title || "").trim());
+}
+
+function nextUntitledChatTitle(chats = [], base = UNTITLED_CHAT_BASE) {
   const used = new Set((chats || []).map((chat) => String(chat?.title || "").trim()));
-  if (!used.has(UNTITLED_CHAT_BASE)) return UNTITLED_CHAT_BASE;
+  if (!used.has(base)) return base;
   let i = 2;
-  while (used.has(`${UNTITLED_CHAT_BASE} ${i}`)) i += 1;
-  return `${UNTITLED_CHAT_BASE} ${i}`;
+  while (used.has(`${base} ${i}`)) i += 1;
+  return `${base} ${i}`;
 }
 
-function normalizeChatTitles(chats = []) {
+function normalizeChatTitles(chats = [], base = UNTITLED_CHAT_BASE) {
   const used = new Set();
   let untitledCounter = 1;
 
@@ -326,11 +332,11 @@ function normalizeChatTitles(chats = []) {
     const next = { ...(chat || {}) };
     let title = String(next.title || "").trim();
 
-    if (!title || isUntitledChatTitle(title)) {
-      let candidate = untitledCounter === 1 ? UNTITLED_CHAT_BASE : `${UNTITLED_CHAT_BASE} ${untitledCounter}`;
+    if (!title || isUntitledChatTitle(title, base)) {
+      let candidate = untitledCounter === 1 ? base : `${base} ${untitledCounter}`;
       while (used.has(candidate)) {
         untitledCounter += 1;
-        candidate = untitledCounter === 1 ? UNTITLED_CHAT_BASE : `${UNTITLED_CHAT_BASE} ${untitledCounter}`;
+        candidate = untitledCounter === 1 ? base : `${base} ${untitledCounter}`;
       }
       title = candidate;
       untitledCounter += 1;
@@ -511,6 +517,7 @@ function createDefaultChat(title = UNTITLED_CHAT_BASE, assistantText = "", owner
   return {
     id: makeChatId(),
     ownerUid,
+    chatScope: "institution",
     title,
     updatedAt: Date.now(),
     messages: assistantText
@@ -597,6 +604,7 @@ function Bubble({
   onNotesTool,
   onFlashcardsTool,
   onSimplerTool,
+  showStudyTools = true,
 }) {
   const isUser = role === "user";
   const isError = !isUser && isErrorText(text);
@@ -829,7 +837,7 @@ function Bubble({
           </div>
         ) : null}
 
-        {!isUser && !streaming && !isTypingAnim && String(text || "").trim() ? (
+        {!isUser && showStudyTools && !streaming && !isTypingAnim && String(text || "").trim() ? (
           <div className="mt-2.5 pt-2.5 border-t border-slate-200/70">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
@@ -945,19 +953,28 @@ export default function NewChatLanding({
   onOpenAdmin,
   chatMode = "student",
   workspaceContext = null,
+  embeddedInAdminShell = false,
   userRole: initialUserRole,
   initialAssistantMessage,
 }) {
   const firebaseUser = auth?.currentUser || null;
   const profileName = resolveProfileName(firebaseUser);
   const resolvedChatMode = chatMode === "admin" ? "admin" : "student";
+  const isEmbeddedAdminChat = resolvedChatMode === "admin";
+  const isAdminShellEmbed = isEmbeddedAdminChat && embeddedInAdminShell;
+  const untitledChatBase = isEmbeddedAdminChat ? "Admin Workspace" : UNTITLED_CHAT_BASE;
+  const storageScope = isEmbeddedAdminChat ? "institution_admin" : "institution";
+  const chatsStorageKey = `${storageScope}_chats`;
+  const activeChatStorageKey = `${storageScope}_active_chat`;
   const modeConfig = CHAT_MODE_CONFIG[resolvedChatMode];
   const starterSet = modeConfig.starters;
   const defaultAssistantMessage =
     String(initialAssistantMessage || "").trim() ||
     getDefaultAssistantMessage(resolvedChatMode, profileName);
 
-  const [active, setActive] = useState(initialView === "chat" ? "newchat" : (initialView || "newchat"));
+  const [active, setActive] = useState(
+    isEmbeddedAdminChat ? "newchat" : (initialView === "chat" ? "newchat" : (initialView || "newchat"))
+  );
   const [userRole, setUserRole] = useState(initialUserRole || null);
   const [input, setInput] = useState("");
   const [chats, setChats] = useState([]);
@@ -1070,12 +1087,18 @@ export default function NewChatLanding({
       .map((chat) => ({
         ...chat,
         ownerUid: chat.ownerUid || uid,
+        chatScope: chat.chatScope || storageScope,
         messages: Array.isArray(chat.messages) ? chat.messages : [],
       }))
-      .filter((chat) => (chat.ownerUid || uid) === uid);
+      .filter((chat) => (chat.ownerUid || uid) === uid)
+      .filter((chat) => (chat.chatScope || storageScope) === storageScope);
   }
 
   function syncActiveView(next, mode = "replace") {
+    if (isEmbeddedAdminChat) {
+      setActive(next === "chat" ? "newchat" : next);
+      return;
+    }
     if (typeof window !== "undefined") {
       const currentState = window.history.state || {};
       const nextState = { ...currentState, [ACTIVE_VIEW_KEY]: next };
@@ -1198,6 +1221,7 @@ export default function NewChatLanding({
   }, [isProfileSheetOpen]);
 
   useEffect(() => {
+    if (isEmbeddedAdminChat) return;
     if (typeof window === "undefined") return;
     const currentState = window.history.state || {};
     const currentView = currentState[ACTIVE_VIEW_KEY];
@@ -1212,7 +1236,7 @@ export default function NewChatLanding({
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [active, isEmbeddedAdminChat]);
 
   useEffect(() => {
     const unsubscribe = auth?.onAuthStateChanged
@@ -1238,14 +1262,14 @@ export default function NewChatLanding({
       return;
     }
 
-    const savedChats = readScopedJson(currentUid, "institution_chats", []);
-    const savedActiveChatId = readScopedJson(currentUid, "institution_active_chat", null);
-    const ownedChats = normalizeOwnedChats(savedChats, currentUid);
+    const savedChats = readScopedJson(currentUid, chatsStorageKey, []);
+    const savedActiveChatId = readScopedJson(currentUid, activeChatStorageKey, null);
+    const ownedChats = normalizeChatTitles(normalizeOwnedChats(savedChats, currentUid), untitledChatBase);
 
     const nextChats =
       ownedChats.length > 0
         ? ownedChats
-        : [createDefaultChat(UNTITLED_CHAT_BASE, defaultAssistantMessage, currentUid)];
+        : [{ ...createDefaultChat(untitledChatBase, defaultAssistantMessage, currentUid), chatScope: storageScope }];
 
     setChats(nextChats);
     setActiveChatId(
@@ -1253,13 +1277,13 @@ export default function NewChatLanding({
         ? savedActiveChatId
         : nextChats[0]?.id || null
     );
-  }, [currentUid, defaultAssistantMessage]);
+  }, [activeChatStorageKey, chatsStorageKey, currentUid, defaultAssistantMessage, storageScope, untitledChatBase]);
 
   useEffect(() => {
     if (!currentUid) return;
     const ownedChats = normalizeOwnedChats(chats, currentUid);
-    writeScopedJson(currentUid, "institution_chats", ownedChats);
-  }, [currentUid, chats]);
+    writeScopedJson(currentUid, chatsStorageKey, ownedChats);
+  }, [chatsStorageKey, currentUid, chats]);
 
   useEffect(() => {
     const ownedChats = normalizeOwnedChats(chats, currentUid);
@@ -1269,8 +1293,8 @@ export default function NewChatLanding({
 
   useEffect(() => {
     if (!currentUid) return;
-    writeScopedJson(currentUid, "institution_active_chat", activeChatId);
-  }, [currentUid, activeChatId]);
+    writeScopedJson(currentUid, activeChatStorageKey, activeChatId);
+  }, [activeChatStorageKey, currentUid, activeChatId]);
 
   useEffect(() => {
     if (!isNewChatMenuOpen) return;
@@ -1360,6 +1384,15 @@ export default function NewChatLanding({
       gpa: "3.8",
     }),
     [settingsProfile, profileName, firebaseUser]
+  );
+  const adminOverviewCards = useMemo(
+    () => [
+      { title: "Pending Workflows", value: "12", subtitle: "Needs review" },
+      { title: "Attendance Alerts", value: "5", subtitle: "Flagged classes" },
+      { title: "Results Blockers", value: "7", subtitle: "Approval bottlenecks" },
+      { title: "Subgroup Queues", value: "9", subtitle: "Awaiting action" },
+    ],
+    []
   );
 
   const preferredSpeechLanguage = useMemo(
@@ -1632,9 +1665,9 @@ export default function NewChatLanding({
         });
         const currentTitle = String(chat.title || "").trim();
         const nextTitle =
-          isUntitledChatTitle(currentTitle) && titleHint
+          isUntitledChatTitle(currentTitle, untitledChatBase) && titleHint
             ? titleHint.slice(0, 40)
-            : currentTitle || nextUntitledChatTitle(prev);
+            : currentTitle || nextUntitledChatTitle(prev, untitledChatBase);
         return { ...chat, messages: nextMessages, title: nextTitle, updatedAt: Date.now() };
       })
     );
@@ -1652,6 +1685,10 @@ export default function NewChatLanding({
     setIsMobileDrawerOpen(false);
     setIsMobileMoreOpen(false);
     setIsMorePopupOpen(false);
+    if (typeof onOpenAdmin === "function") {
+      onOpenAdmin();
+      return;
+    }
     syncActiveView("admin", "push");
   }
 
@@ -1725,7 +1762,10 @@ export default function NewChatLanding({
   }
 
   function startNewChat() {
-    const next = createDefaultChat(nextUntitledChatTitle(chats), "", currentUid);
+    const next = {
+      ...createDefaultChat(nextUntitledChatTitle(chats, untitledChatBase), "", currentUid),
+      chatScope: storageScope,
+    };
     setChats((prev) => [next, ...prev]);
     setActiveChatId(next.id);
     setContextByChat((prev) => ({ ...prev, [next.id]: { ...EMPTY_ACADEMIC_CONTEXT } }));
@@ -1736,7 +1776,7 @@ export default function NewChatLanding({
   function renameChatById(chatId) {
     const target = chats.find((chat) => chat.id === chatId);
     if (!target) return;
-    const nextTitle = window.prompt("Rename chat", target.title || UNTITLED_CHAT_BASE);
+    const nextTitle = window.prompt("Rename chat", target.title || untitledChatBase);
     if (!nextTitle || !nextTitle.trim()) return;
     setChats((prev) =>
       prev.map((chat) => (chat.id === chatId ? { ...chat, title: nextTitle.trim() } : chat))
@@ -1747,7 +1787,10 @@ export default function NewChatLanding({
     setChats((prev) => {
       const filtered = prev.filter((chat) => chat.id !== chatId);
       if (filtered.length === 0) {
-        const fallback = createDefaultChat(UNTITLED_CHAT_BASE, "", currentUid);
+        const fallback = {
+          ...createDefaultChat(untitledChatBase, "", currentUid),
+          chatScope: storageScope,
+        };
         setActiveChatId(fallback.id);
         return [fallback];
       }
@@ -2175,7 +2218,7 @@ export default function NewChatLanding({
 
     updateActiveChatMessages(
       (m) => [...m, { role: "user", text: messageText, ownerUid: currentUid, createdAt: Date.now() }],
-      clean || "New Chat"
+      clean || untitledChatBase
     );
     if (clean) setLastPrompt(clean);
     setInput("");
@@ -2470,7 +2513,14 @@ export default function NewChatLanding({
   }
 
   return (
-    <div className="min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden">
+    <div
+      className={[
+        isAdminShellEmbed
+          ? "h-full min-h-0 bg-slate-100 flex flex-col overflow-hidden"
+          : "min-h-[100dvh] h-[100dvh] bg-slate-100 flex flex-col overflow-hidden md:h-[100dvh] md:overflow-hidden",
+      ].join(" ")}
+    >
+      {!isAdminShellEmbed ? (
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 pointer-events-none">
         <div className="bg-gradient-to-b from-white/80 via-white/40 to-transparent px-3 py-3 flex items-center justify-between pointer-events-auto">
           <div className="flex items-center gap-2 min-w-0">
@@ -2530,6 +2580,7 @@ export default function NewChatLanding({
           </div>
         ) : null}
       </div>
+      ) : null}
 
       {isNotifOpen && notifAnchor ? (
         <>
@@ -2672,6 +2723,7 @@ export default function NewChatLanding({
         </>
       ) : null}
 
+      {!isAdminShellEmbed ? (
       <div className="hidden md:block w-full px-4 md:px-5 pt-1.5 pb-0.5 shrink-0 relative z-20">
         <div className="surface-elevated h-12 rounded-xl border border-slate-200/85 bg-slate-50/95 shadow-[0_6px_16px_rgba(15,23,42,0.05)] px-2.5 md:px-3 flex items-center gap-2">
           <button
@@ -2965,8 +3017,9 @@ export default function NewChatLanding({
           </div>
         </div>
       </div>
+      ) : null}
 
-      {isMobileDrawerOpen ? (
+      {!isAdminShellEmbed && isMobileDrawerOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsMobileDrawerOpen(false)} />
           <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl border-r border-slate-200">
@@ -3039,7 +3092,7 @@ export default function NewChatLanding({
                                   activeChatId === chat.id ? "text-white font-semibold" : "text-slate-700 font-medium",
                                 ].join(" ")}
                               >
-                                {chat.title || UNTITLED_CHAT_BASE}
+                                {chat.title || untitledChatBase}
                               </div>
                               <div
                                 className={[
@@ -3163,8 +3216,14 @@ export default function NewChatLanding({
         </div>
       ) : null}
 
-      <div className="w-full px-4 md:px-5 pt-1.5 pb-4 flex-1 min-h-0 overflow-hidden">
-        <div className="h-full min-h-0 md:flex md:gap-4">
+      <div
+        className={[
+          "w-full flex-1 min-h-0 overflow-hidden",
+          isAdminShellEmbed ? "px-0 py-0" : "px-4 md:px-5 pt-1.5 pb-4",
+        ].join(" ")}
+      >
+        <div className={["h-full min-h-0", isAdminShellEmbed ? "" : "md:flex md:gap-4"].join(" ")}>
+        {!isAdminShellEmbed ? (
         <aside
           className={[
             "hidden md:block h-full min-h-0 shrink-0 transition-[width] duration-300 ease-out",
@@ -3274,7 +3333,7 @@ export default function NewChatLanding({
                                   activeChatId === chat.id ? "text-white font-semibold" : "text-slate-700 font-medium",
                                 ].join(" ")}
                               >
-                                {chat.title || UNTITLED_CHAT_BASE}
+                                {chat.title || untitledChatBase}
                               </div>
                               <div
                                 className={[
@@ -3416,6 +3475,7 @@ export default function NewChatLanding({
             </nav>
           </div>
         </aside>
+        ) : null}
 
         <main
           className={[
@@ -3517,6 +3577,7 @@ export default function NewChatLanding({
                       onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
                       onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
                       onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                      showStudyTools={!isEmbeddedAdminChat}
                     />
                   </div>
                 ))}
@@ -3724,9 +3785,9 @@ export default function NewChatLanding({
             <div className="surface-elevated relative hidden md:flex flex-1 min-h-0 flex-col rounded-2xl bg-slate-50/70">
             <div className="px-4 py-2.5 shrink-0">
               <div className="max-w-[1080px] w-full mx-auto">
-                <div className="text-sm font-semibold text-slate-800">{activeChat?.title || UNTITLED_CHAT_BASE}</div>
+                <div className="text-sm font-semibold text-slate-800">{activeChat?.title || untitledChatBase}</div>
                 <div className="text-xs text-slate-500">
-                  AI Academic Assistant • {formatChatStamp(activeChat?.updatedAt)}
+                  {isEmbeddedAdminChat ? "Institution Admin Assistant" : "AI Academic Assistant"} • {formatChatStamp(activeChat?.updatedAt)}
                 </div>
                 {activeContextLabel ? (
                   <div className="mt-1 inline-flex items-center rounded-full border border-slate-200/80 bg-white/85 px-3 py-1 text-[11px] text-slate-600">
@@ -3738,12 +3799,19 @@ export default function NewChatLanding({
 
             <div className={[hasConversation ? "px-4 pt-1 pb-2" : "px-4 pt-1 pb-2", "flex-1 min-h-0 flex flex-col"].join(" ")}>
               <div className="max-w-[1080px] w-full mx-auto flex-1 min-h-0 flex flex-col">
-              {messages.length === 0 ? (
+              {messages.length === 0 && !isEmbeddedAdminChat ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
                   <StatCard title="Next Class" value={user.nextClass} subtitle="From your timetable" />
                   <StatCard title="Balance" value={user.balance} subtitle="Fees portal" />
                   <StatCard title="Attendance" value={user.attendance} subtitle="This month" />
                   <StatCard title="GPA Progress" value={user.gpa} subtitle="Current GPA" />
+                </div>
+              ) : null}
+              {messages.length === 0 && isEmbeddedAdminChat ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5 shrink-0 mb-3">
+                  {adminOverviewCards.map((item) => (
+                    <StatCard key={item.title} title={item.title} value={item.value} subtitle={item.subtitle} />
+                  ))}
                 </div>
               ) : null}
 
@@ -3797,6 +3865,7 @@ export default function NewChatLanding({
                       onNotesTool={() => sendMessage(`Turn this answer into clean study notes:\n\n${m.text}`)}
                       onFlashcardsTool={() => sendMessage(`Generate revision flashcards (Q/A) from this answer:\n\n${m.text}`)}
                       onSimplerTool={() => sendMessage(`Explain this answer in simpler student-friendly language:\n\n${m.text}`)}
+                      showStudyTools={!isEmbeddedAdminChat}
                     />
                   </div>
                 ))}
